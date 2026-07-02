@@ -1,0 +1,70 @@
+Przez ostatni rok pracowałam przy czterech wdrożeniach LLM w polskich firmach — fintech, e-commerce, firma prawnicza i SaaS B2B. Żadne nie poszło dokładnie tak jak planowaliśmy. Wszystkie skończyły się czymś działającym. Z tych projektów wyciągnęłam wnioski, które chcę tu zebrać — bo widzę te same błędy powtarzane przez różnych klientów i trochę mnie to boli.
+
+To nie jest artykuł o tym, jak "zacząć z ChatGPT API". To artykuł o tym, jak dojść do działającego systemu w produkcji — bez przepalenia budżetu i bez rozczarowania.
+
+## Zanim napiszesz pierwszą linię kodu
+
+Najdroższy błąd, jaki widzę u klientów: rzucenie się na implementację bez jasnego zdefiniowania sukcesu.
+
+Konkrety. "Asystent AI do obsługi klientów" to nie wymaganie. "Odpowiadanie na pytania o statusy zamówień w czasie poniżej 3 sekund, obsługa polskich i angielskich zapytań" — to wymaganie. Różnica polega na tym, że drugie można zmierzyć, a pierwsze nie.
+
+Co jest akceptowalnym błędem? To pytanie, które zmienia architekturę. Asystent prawny halucynujący fakty 1% czasu to katastrofa. Asystent e-commerce dający złą informację o rozmiarze buta 2% czasu — mniejszy problem, bo klient i tak sprawdzi na stronie. Tolerancja na błędy definiuje co budujemy.
+
+Kto utrzyma system po starcie? LLM-y wymagają monitoringu, aktualizacji baz wiedzy, reagowania na degradację. Jeśli nie ma osoby odpowiedzialnej, projekt umrze po 3 miesiącach od deklarowanego "sukcesu wdrożenia". Widziałam to wielokrotnie.
+
+## Wybór modelu: nie zaczynaj od najdroższego
+
+Benchmarkuj na własnym zadaniu. Zbierz 50–100 reprezentatywnych przykładów wejścia z oczekiwanym wyjściem. Przetestuj na co najmniej 3 modelach: duży (GPT-4o, Claude Sonnet), mały (GPT-4o mini, Claude Haiku), ewentualnie własny open-source (Llama na własnym inference).
+
+Dla 70% zadań biznesowych Haiku lub GPT-4o mini dają wyniki nie do odróżnienia od dużych modeli. W jednym projekcie zaczęłam od Claude Opus i skończyłam na Haiku z identyczną jakością — przy 15× niższym koszcie. Nie zakochuj się w wielkim modelu zanim sprawdzisz że mały nie wystarczy.
+
+Orientacyjne koszty (input + output, na 1000 zapytań po ~500 tokenów): GPT-4o: 8–12 USD przy latencji p95 3–8s. GPT-4o mini: 0,40–0,80 USD przy 1–3s. Claude Haiku 4.5: 0,20–0,60 USD przy 0,5–2s. Llama 3.1 8B self-hosted: 0,05–0,15 USD przy 0,3–1,5s. Różnica w koszcie operacyjnym przy skali jest ogromna.
+
+## Architektura systemu
+
+Dla większości biznesowych zastosowań polecam prosty stack:
+
+```
+Użytkownik → Input validation + PII stripping → Retrieval layer ← Vector DB
+→ Context assembly ← Historia rozmowy → LLM API → Output validation → Odpowiedź + log
+```
+
+**Input validation:** Minimum to wykrycie i usunięcie PII (PESEL, numery kart), filtrowanie prompt injection, limitowanie długości wejścia. Możesz to zrobić prostym regex + klasyfikatorem — nie musisz od razu używać specjalizowanej biblioteki.
+
+**Retrieval:** Jeśli system potrzebuje dostępu do firmowych dokumentów — bez RAG dostaniesz halucynacje. Na wybór vector store: do 10 000 dokumentów pgvector na Postgresie wystarczy. Do miliona: Qdrant lub Pinecone. Powyżej: Weaviate lub Elasticsearch z kNN. Dla polskich treści polecam embeddingi `multilingual-e5-large` zamiast `text-embedding-3-small`.
+
+**Guardrails:** Sprawdzaj format wyjścia, wykrywaj potencjalne halucynacje (np. linki do stron które nie istnieją), moderuj content jeśli system jest publiczny. Biblioteki: `guardrails-ai`, `nemo-guardrails`, albo prosta implementacja własna — to ostatnie czasem działa lepiej bo rozumiesz co sprawdzasz.
+
+## Ewaluacja przed wdrożeniem — krok który wszyscy pomijają
+
+Mój minimalny dataset ewaluacyjny to 200 przypadków: 100 normalnych zapytań, 50 edge case'ów (niejasne, wieloznaczne, pytania spoza zakresu), 30 adversarialnych (prompt injection, pytania o konkurencję), 20 regresyjnych (rzeczy które zawsze muszą działać dobrze, np. poprawna forma grzecznościowa).
+
+Automatyczna ewaluacja: LLM-as-a-judge. Kontrowersyjne, bo model ocenia inny model. Działa lepiej niż nic. Kalibruj przez regularne ręczne próbkowanie.
+
+Projekty które pominęły budowanie datasetu testowego z góry iterowały "na intuicję" przez cały czas. Zmiana prompta "wydaje się lepsza" mogła niszczyć coś innego. Bez datasetu tego nie wiesz.
+
+## Monitoring produkcyjny
+
+System LLM bez monitoringu to bomba zegarowa. Metrykami, które śledzę zawsze: latencja p50 i p95 (chcę wiedzieć zarówno medianę jak i ogon), error rate (alert gdy powyżej 1% przez 5 minut), koszt per zapytanie (niespodziewany wzrost to sygnał że coś się zepsuło), rejection rate przez guardrails.
+
+Logi każdego zapytania i odpowiedzi — ze zredagowanymi danymi osobowymi — to Twój zasób na przyszłość. Do analizy błędów, do fine-tuningu, do raportowania. Minimum 30 dni. Narzędzia: Langfuse (open-source, można hostować on-premise dla RODO), LangSmith, lub własna integracja z Grafaną.
+
+## Błędy które widziałam najczęściej
+
+System prompt napisany w 5 minut. "Jesteś pomocnym asystentem firmy X. Odpowiadaj na pytania klientów." i nic więcej. Widziałam to w produkcyjnym systemie dużego retailera. Zaproszenie do problemów.
+
+Brak obsługi "nie wiem". Model, który zawsze próbuje odpowiedzieć, halucynuje. Naucz system rozpoznawać kiedy ma powiedzieć "nie mam tej informacji" i eskalować do człowieka.
+
+Jeden model dla wszystkiego. Routowanie zapytań do różnych modeli zależnie od złożoności to duże oszczędności. FAQ → mały model. Złożona analiza → duży. Nie każde zapytanie potrzebuje GPT-4.
+
+Launch and forget. Widziałam system, który po 3 miesiącach odpowiadał coraz gorzej — bo dokumentacja produktu była aktualizowana, ale baza wektorowa nie. Ustal harmonogram aktualizacji wiedzy od pierwszego dnia.
+
+## Realistyczny timeline
+
+Od zera do produkcji przy prostszym zastosowaniu: tydzień 1–2 na definicję wymagań i dataset ewaluacyjny, tydzień 3–4 na prototyp (najprościej jak się da), tydzień 5–6 na ewaluację i iterację promptów, tydzień 7–8 na guardrails i stress testing, tydzień 9 na pilotaż z małą grupą, tydzień 10–12 na produkcję z intensywnym monitoringiem.
+
+12 tygodni to ambitne, ale realne. Jeśli ktoś obiecuje działający system w tydzień — warto dopytać co rozumie przez "działający".
+
+---
+
+*Pytania o konkretne aspekty wdrożenia? Następny artykuł poświęcam ewaluacji modeli — jak zbudować rzetelny benchmark dla własnego zastosowania.*

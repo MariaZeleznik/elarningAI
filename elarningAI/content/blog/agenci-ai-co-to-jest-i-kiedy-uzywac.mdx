@@ -1,0 +1,61 @@
+Agenci AI. Dwa słowa, które przez ostatnie 18 miesięcy stały się synonimem zarówno "przyszłości pracy" jak i — szczerze mówiąc — marketingowego bullshitu. Moja rolą jest być precyzyjna: co to naprawdę jest, co nie jest, i kiedy ma sens zbudować agenta zamiast prostszego rozwiązania.
+
+Spoiler: agenci są fascynujący i czasem naprawdę użyteczni. Ale w 60–70% przypadków, gdy klient pyta mnie o "agenta AI", potrzebuje prostego systemu RAG z kilkoma wywołaniami API. Rozróżnienie jest ważne, bo agent to zupełnie inne koszty, inna złożoność, inny profil ryzyka.
+
+## Czym jest agent AI
+
+Agent AI to system, który percepuje stan środowiska, planuje działania w oparciu o cel, wykonuje narzędzia (szuka w internecie, pisze kod, wywołuje API, modyfikuje pliki), obserwuje wyniki i adaptuje plan, a potem iteruje — aż do osiągnięcia celu lub wyczerpania kroków.
+
+Kluczowe słowo: *iteruje*. To odróżnia agenta od pipeline'u.
+
+W pipeline sekwencja kroków jest deterministyczna i znana z góry. Krok A → krok B → krok C. Jeśli krok B zawiedzie — błąd. Agent może próbować inaczej. Może wrócić do kroku A z nowym planem. Może zapytać użytkownika o wyjaśnienie.
+
+Ta elastyczność jest jednocześnie siłą i słabością. Agent potrafi obsłużyć scenariusze, które nie były zaprojektowane. Może też wpaść w pętle, wykonać niechciane akcje, przepalić tokeny na nieskończone iteracje.
+
+## Architektura: wzorzec ReAct
+
+Najpopularniejszy wzorzec to ReAct (Reasoning + Acting). Cykl jednego kroku wygląda tak: model patrzy na obserwacje, myśli co to oznacza i jaki ma cel, decyduje jakie narzędzie wywołać, obserwuje wynik, myśli czy osiągnął cel. I powtarza.
+
+Każde "myślenie" i każde wywołanie narzędzia to oddzielne wywołanie LLM. 5-krokowy agent = 5 wywołań API = 5× wyższy koszt niż jedno zapytanie. To nie jest zarzut — to fakt, który należy uwzględnić w architekturze.
+
+## Frameworki w 2026
+
+Rynek narzędzi zmienia się szybko. To co działało rok temu może być dziś outdated.
+
+**LangGraph** — oparty o grafy stanów. Daje precyzyjną kontrolę nad przepływem, dobrą obsługę cykli, wsparcie dla wieloagentowych systemów. Stroma krzywa uczenia, ale bardzo elastyczny. Mój wybór dla złożonych systemów.
+
+**OpenAI Agents SDK** — stosunkowo prosta API, dobra integracja z narzędziami. Jeśli używasz modeli OpenAI i chcesz szybko prototypować, to dobry start.
+
+**CrewAI** — abstrakcja wyższego poziomu. Definiujesz "crew" agentów z rolami. Szybszy start, mniej kontroli nad tym co się dzieje pod spodem. Dla prototypów i projektów, gdzie złożoność jest ograniczona.
+
+Mój default w nowych projektach: LangGraph dla złożonych systemów wieloagentowych, OpenAI Agents SDK dla prostszych jednagentowych zadań.
+
+## Kiedy agent, kiedy nie
+
+To jest kluczowa decyzja. I nie ma tu jednej odpowiedzi — jest kilka pytań, które warto sobie zadać.
+
+Czy zadanie wymaga dynamicznego planowania? Jeśli sekwencja kroków jest zawsze taka sama — użyj pipeline'u. Agent wnosi wartość tylko gdy plan musi się adaptować.
+
+Czy tolerujesz nieprzewidywalny koszt? Agenty mogą wpaść w pętle (szczególnie przy niedobrych narzędziach lub niejasnych celach). Zawsze ustaw `max_iterations` i monitoruj koszt. Brak tego to przepis na niespodziankę na rachunku za API.
+
+Czy użytkownik akceptuje latencję? Agent wykonujący 8 kroków potrzebuje 30–90 sekund. Akceptowalne w przepływach "poproś i poczekaj", niedopuszczalne w interaktywnych chatach.
+
+## Bezpieczeństwo w produkcji — niedoceniany temat
+
+Muszę to powiedzieć wprost, bo za mało o tym słyszę: agenty z dostępem do narzędzi mogą wyrządzić realną szkodę. Usunąć dane. Wysłać emaile. Wykonać transakcje finansowe. 
+
+Zasady, których nigdy nie łamię: agenty powinny mieć minimalne uprawnienia (nie dawaj narzędzia do usuwania plików agentowi, który tylko analizuje dane). Każde destruktywne, nieodwracalne działanie — zatwierdzenie przez człowieka. Generowanie i wykonanie kodu — tylko w izolowanym środowisku (Docker, VM). Pełny log każdego wywołania narzędzia. I limity: maksymalna liczba kroków, czas, koszt.
+
+Bez tych zabezpieczeń jeden niepoprawny prompt lub edge case może skończyć się problemem, który trudno będzie cofnąć.
+
+## Wieloagentowe systemy
+
+Dla naprawdę złożonych zadań można orkiestrować kilka wyspecjalizowanych agentów. Agent Research zbiera dane, Agent Writer generuje tekst, Agent Editor sprawdza spójność, Orchestrator zarządza całością.
+
+Brzmi potężnie — bo jest. Ale złożoność rośnie nieliniowo. Debugowanie wieloagentowego systemu jest znacznie trudniejsze niż jednagentowego. Zanim zaczniesz myśleć o multi-agent, sprawdź czy jeden agent z odpowiednimi narzędziami nie wystarczy.
+
+Zacznij od prostszego rozwiązania i sięgaj po agenta tylko gdy proste nie wystarczy.
+
+---
+
+*Widzisz konkretne zastosowanie dla agenta w swoim projekcie? Opisuję hands-on tutorial z kodem — budujemy agenta do analizy dokumentów z LangGraph.*

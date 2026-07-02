@@ -1,0 +1,184 @@
+﻿W 2020 roku jeden z moich klientów płacił 18 000 PLN miesięcznie za Redshift. Kiedy po 3 miesiącach analizy przeprowadziliśmy ich na BigQuery z odpowiednią konfiguracją partycjonowania - rachunek spadł do 2 200 PLN. Te same dane, te same zapytania, inne decyzje architektoniczne.
+
+Hurtownie danych kosztują tyle, ile pozwolisz im kosztować. To jest główny wniosek po 14 latach pracy z różnymi platformami.
+
+Ale teraz mamy 2026 i rynek hurtowni danych przeszedł prawdziwą ewolucję. DuckDB zmienił zasady gry. Iceberg stał się standardem. "Serverless" naprawdę zaczął coś znaczyć. Piszę o tym, co realnie widzę u klientów - nie co piszą w dokumentacjach.
+
+## Krajobraz platform w 2026
+
+Zanim przejdę do poszczególnych platform, dwa zdania o tym jak wygląda rynek. Snowflake i BigQuery to nadal główni gracze enterprise, ale obok nich wyrasta DuckDB — bezpłatny, in-process, bez serwera — który w wielu scenariuszach robi to samo lepiej i za darmo. Databricks konsoliduje ML + data engineering na jednej platformie. Redshift traci rynek na rzecz BigQuery i Snowflake, ale żyje w ekosystemach AWS. MotherDuck to DuckDB w chmurze dla tych, którzy chcą prostoty bez infrastruktury.
+
+## Snowflake: dojrzały, drogi, niezawodny
+
+Snowflake to Rolls-Royce hurtowni danych. Wszystko działa, dokumentacja jest świetna, onboarding jest bezbolesny. Płacisz za to premium — i jest tego warte, jeśli masz enterprise potrzeby i budget.
+
+Co naprawdę lubię: separacja storage i compute. Możesz mieć wiele "virtual warehouses" operujących na tych samych danych — osobny dla BI, osobny dla ETL, osobny dla ML. Każdy skaluje niezależnie. Przy niejednorodnym obciążeniu to spore oszczędności.
+
+Time Travel wyglądał jak marketing trick, dopóki nie uratował projektu naprawdę. Developer przypadkowo nadpisał tabelę produkcyjną. Z Time Travel:
+
+```sql
+-- Odtworzenie tabeli sprzed godziny
+CREATE OR REPLACE TABLE orders AS
+SELECT * FROM orders AT (OFFSET => -3600);
+```
+
+5 minut, żadnych backupów do przywracania. Od tamtej chwili traktuję Time Travel poważnie.
+
+Co mi przeszkadza: cena. Snowflake credits są drogie i łatwo je przepalić. Zapytanie, które w BigQuery kosztuje 2 USD za skan, w Snowflake może kosztować 15 USD przez utrzymywanie aktywnego warehouse.
+
+Ważna konfiguracja, której nikt nie mówi nowym użytkownikom:
+
+```sql
+-- ZAWSZE ustawiaj auto-suspend i auto-resume
+ALTER WAREHOUSE my_warehouse SET
+  AUTO_SUSPEND = 60          -- sekundy bezczynności do wstrzymania
+  AUTO_RESUME = TRUE;        -- automatyczne wznowienie przy zapytaniu
+```
+
+Bez tego warehouse biegnie nawet gdy nic nie robi. Widziałem rachunki 40 000 PLN za miesiąc w firmach, które zapomniały o tym ustawieniu.
+
+## BigQuery: serverless naprawdę serverless
+
+BigQuery jest moim domyślnym wyborem dla nowych klientów w ekosystemie Google Cloud. Zero operacji. Nie ma klastrów do zarządzania. Uruchamiasz zapytanie, BigQuery alokuje zasoby, płacisz za TB skanowane.
+
+Ten model cenowy ma konkretne konsekwencje dla architektury:
+
+```sql
+-- Droga kwerenda: skanuje całą tabelę (100 GB → ~0.5 USD za skan)
+SELECT * FROM orders WHERE DATE(created_at) = '2025-12-01'
+
+-- Tania kwerenda: partycjonowanie ogranicza skan
+-- Tabela partycjonowana po kolumnie _PARTITIONDATE
+SELECT * FROM orders WHERE _PARTITIONDATE = '2025-12-01'
+-- BigQuery skanuje tylko partycję z danego dnia
+```
+
+Przy dobrze skonfigurowanym partycjonowaniu i klastrowanym (CLUSTER BY) możesz obniżyć koszty 10–100×.
+
+**Flat-rate vs. on-demand:** BigQuery ma dwa modele. On-demand (za TB) jest dobry do 5–10 TB miesięcznie. Dla wyższych wolumenów rozważ flat-rate (abonament za "slot-hours") - przy właściwym użyciu tańszy.
+
+BigQuery ML to feature, który wielu ignoruje:
+
+```sql
+-- Trenowanie modelu regresji bezpośrednio w SQL
+CREATE OR REPLACE MODEL `projekt.dataset.churn_model`
+OPTIONS(
+  model_type='logistic_reg',
+  input_label_cols=['churned']
+) AS
+SELECT 
+  days_since_last_purchase,
+  total_orders,
+  avg_order_value,
+  support_tickets_count,
+  churned
+FROM `projekt.dataset.customer_features`
+WHERE created_at < '2025-01-01';
+
+-- Predykcja
+SELECT customer_id, predicted_churned, predicted_churned_probs
+FROM ML.PREDICT(MODEL `projekt.dataset.churn_model`,
+  TABLE `projekt.dataset.customer_features`
+  WHERE created_at >= '2025-01-01'
+);
+```
+
+Nie zastępuje to prawdziwego ML workflow - ale dla szybkiego prototypu lub prostych modeli jest dramatycznie szybszy niż export danych do Python.
+
+## DuckDB: zmiana reguł gry
+
+Trzy lata temu DuckDB był ciekawostką. Dzisiaj używam go w co najmniej połowie projektów. To jest największa zmiana w krajobrazie analityki danych ostatnich lat.
+
+DuckDB to in-process analytic database - działa wewnątrz Twojego procesu Python (albo CLI), nie wymaga serwera, jest w pełni darmowe.
+
+```python
+import duckdb
+
+# Bezpośrednie zapytanie na plikach Parquet
+result = duckdb.sql("""
+  SELECT 
+    DATE_TRUNC('month', order_date) AS month,
+    SUM(revenue) AS total_revenue,
+    COUNT(DISTINCT customer_id) AS unique_customers
+  FROM read_parquet('s3://my-bucket/orders/*.parquet')
+  WHERE order_date >= '2025-01-01'
+  GROUP BY 1
+  ORDER BY 1
+""").df()
+
+# result to pandas DataFrame, gotowy do analizy
+```
+
+**Dlaczego to jest rewolucja:** możesz teraz robić analitykę na dużych danych bez hurtowni danych. Plik Parquet 50 GB na S3 → DuckDB zapytanie w 15 sekund na laptopie, bez infrastruktury.
+
+Porównanie DuckDB vs pandas na 10M wierszy:
+
+| Operacja | pandas | DuckDB |
+|----------|--------|--------|
+| Group by + agg | 8.2s | 0.9s |
+| Join dwóch tabel | 12.4s | 1.8s |
+| Window function | 9.1s | 1.2s |
+| Zapis do Parquet | 4.3s | 0.8s |
+
+DuckDB jest szybszy nie dlatego, że jest "magiczny" - bo jest zoptymalizowany kolumnowo i wielowątkowo, dokładnie jak klasyczne hurtownie danych, ale lokalnie.
+
+**MotherDuck:** chmurowy DuckDB, gdzie możesz łączyć lokalne pliki z danymi w chmurze. Dla małych firm (startupy, SaaS do 1M USD przychodu) to alternatywa dla Snowflake za ułamek ceny.
+
+## Apache Iceberg: format który zmienia architekturę
+
+Nie możę pisać o hurtowniach w 2026 bez wspomnienia Iceberg. To nie jest platforma - to otwarty format tabel, który teraz obsługują wszystkie główne platformy.
+
+Dlaczego to ważne:
+
+```
+PRZED Iceberg (problem vendor lock-in):
+  Dane w Snowflake → możesz je odczytać tylko w Snowflake
+
+PO Iceberg:
+  Dane w Iceberg na S3 → Snowflake, Spark, Flink, DuckDB, Athena - 
+  wszystkie odczytują ten sam format
+```
+
+Iceberg dodaje do "surowych" Parquet:
+- **Transakcje ACID** - atomowe operacje na dużych tabelach
+- **Schema evolution** - dodawanie/usuwanie kolumn bez przepisywania danych
+- **Time travel** - jak Snowflake, ale w otwartym formacie
+- **Partition pruning** - automatyczna eliminacja zbędnych plików przy zapytaniach
+
+Dla nowych projektów, gdzie masz wybór, polecam architekturę "Lakehouse":
+- Storage: S3 / GCS (tani, trwały)
+- Format: Iceberg / Delta Lake
+- Query engine: Spark / Flink do transformacji + DuckDB / Athena / BigQuery do analityki
+
+To najlepsza kombinacja: niskie koszty storage, brak lock-in, elastyczność narzędzi.
+
+## Kiedy wybrać co: moja heurystyka po 14 latach
+
+BigQuery: jesteś w GCP, masz zmienne obciążenie, chcesz zero ops, budujesz ML w SQL. Snowflake: enterprise z wymaganiami governance, potrzebujesz multi-cloud, masz dedykowany budget ≥ 2000 USD miesięcznie. DuckDB / MotherDuck: startup lub mała firma z ograniczonym budgetem, analityka na plikach, nie chcesz infrastruktury. Databricks: masz razem inżynierów ML i analityków, streaming + batch + ML w jednym miejscu, team zna Spark.
+
+Moja prosta reguła: jeśli masz poniżej 10 TB danych i zmienne obciążenie — zacznij od BigQuery albo DuckDB + MotherDuck. Oszczędzasz i nie wiążesz się na lata. Snowflake to dla firm, które wiedzą co robią i mają zasoby na zarządzanie platformą.
+
+## Błąd, który kosztuje najwięcej
+
+Na koniec - jeden błąd, który widzę najczęściej i który kosztuje firmy najwięcej pieniędzy:
+
+**Brak zarządzania kosztami od dnia 1.**
+
+Każda platforma ma budgetowe alerty i limity. Ustawiaj je od razu:
+
+```sql
+-- BigQuery: budget alert w Cloud Console (nie ma SQL API)
+-- Snowflake: resource monitor
+CREATE RESOURCE MONITOR monthly_budget
+  WITH CREDIT_QUOTA = 100  -- 100 credits = ~$300
+  TRIGGERS ON 80 PERCENT DO NOTIFY
+  TRIGGERS ON 95 PERCENT DO SUSPEND;
+
+ALTER WAREHOUSE my_warehouse SET RESOURCE_MONITOR = monthly_budget;
+```
+
+W DuckDB kosztu nie ma (open source). W BigQuery i Snowflake - nieograniczony rachunek istnieje i zaskakuje nieostrożnych.
+
+---
+
+*W następnym artykule: jak zaprojektować architekturę danych od zera dla SaaS z 10K użytkowników - praktyczne decyzje krok po kroku.*

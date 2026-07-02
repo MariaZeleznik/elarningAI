@@ -1,0 +1,57 @@
+Pytanie "fine-tuning czy RAG?" słyszę na każdej konferencji ML i w połowie wątków na discordach. I za każdym razem mam ochotę odpowiedzieć: to jest złe pytanie. Bo brzmi jak "czy bardziej potrzebuję wkrętarki czy poziomicy?" — zależy co budujesz.
+
+Ale rozumiem, skąd to pytanie. Mierzysz się z problemem wiedzy modelu. Model nie wie nic o Twoich dokumentach. Nie wie co się zmieniło w Twojej firmie po dacie treningu. Co robisz? Popularny internet mówi: fine-tuning. Popularne tutoriale mówią: RAG. Oboje mają rację w różnych kontekstach i wmawianie Ci że jedno jest "lepsze" to nieporozumienie.
+
+## Co właściwie robi każde z tych podejść
+
+Fine-tuning to modyfikacja wag modelu na własnych danych. Model dosłownie zapamiętuje nowe wzorce bezpośrednio w parametrach. Po fine-tuningu masz inny model — zachowuje się inaczej niż bazowy.
+
+RAG to coś zupełnie innego. Nie zmieniasz modelu. Budujesz system, który PRZED każdym zapytaniem wyszukuje odpowiednie fragmenty z Twojej bazy dokumentów i dorzuca je do kontekstu LLM. Model bazowy zostaje bez zmian — zmienia się tylko co "widzi" przy każdym wywołaniu.
+
+Oba rozwiązują problem wiedzy. Ale kompletnie inne aspekty tego problemu.
+
+## Kiedy naprawdę warto robić fine-tuning
+
+Mam jedno główne kryterium: czy chcesz zmienić *jak* model odpowiada, nie *co* wie?
+
+Jeśli Twoja firma ma specyficzny ton komunikacji — na przykład bardzo formalny, z konkretną terminologią, zawsze w drugiej osobie grzecznościowej i zawsze z podsumowaniem na końcu — fine-tuning może to "wbić" do modelu lepiej niż system prompt. Model nie musi za każdym razem pamiętać instrukcji, bo wzorzec jest w wagach.
+
+Podobnie jeśli masz setki tysięcy przykładów klasyfikacji lub ekstrakcji danych i zależy Ci na kosztach w produkcji. Mały, dostrojony model może być 10-15 razy tańszy niż duży ogólny. Dla milionów zapytań miesięcznie to poważna różnica.
+
+Ale uwaga na pułapkę, w którą wpada mnóstwo ludzi: próba "wgrania wiedzy" przez fine-tuning. Nie to w ten sposób działa. Jeśli zrobisz fine-tuning na 1000 dokumentach firmowych, model nie "nauczy się" tych dokumentów jak faktów. Nauczy się stylu, nie treści. Do treści jest RAG.
+
+Mam to gdzieś że to uproszczenie — takie uproszczenie, które uratowałoby wiele projektów przed przepaleniem budżetu.
+
+## Kiedy RAG jest właściwym wyborem
+
+Niemal zawsze gdy Twoja wiedza się zmienia.
+
+Dokumentacja produktu, regulaminy, baza klientów, ceny — to się aktualizuje. Fine-tuning na takich danych to koszmar operacyjny: za każdą aktualizacją trzeba przeliczać model. Z RAG aktualizujesz dokumenty w bazie wektorowej i gotowe. Koniec historii.
+
+Drugi przypadek: potrzebujesz cytować źródła. W aplikacjach prawniczych, medycznych, compliance'owych — użytkownik musi wiedzieć skąd pochodzi informacja. RAG naturalnie daje cytaty, bo wie z którego fragmentu pochodzi odpowiedź. Fine-tuned model generuje z wewnętrznych wag i nie ma pojęcia "skąd to wie".
+
+Trzeci: masz mało danych. Fine-tuning bez kilku tysięcy przykładów (a najlepiej dziesiątek tysięcy) daje mierne efekty. RAG działa z garścią dokumentów — możesz zbudować system odpowiadający na pytania o 300-stronicową dokumentację od zera. Bez ani jednego przykładu QA.
+
+I szczerze mówiąc, w większości projektów, z którymi przychodzą do mnie klienci — RAG jest właściwym pierwszym krokiem. Szybszy start, tańszy eksperyment, łatwiejsza iteracja. Fine-tuning dochodzi później, jeśli w ogóle.
+
+## Kombinacja obu — bo czemu nie
+
+Zaawansowane systemy produkcyjne często robią jedno i drugie.
+
+Fine-tuning dostosowuje styl i format odpowiedzi do standardów firmy. RAG zapewnia dostęp do aktualnej wiedzy w momencie zapytania. Nie wykluczają się. Uzupełniają.
+
+Schemat który widzę coraz częściej: model fine-tuned na przykładach jak odpowiadać (ton, format, kiedy eskalować do człowieka) + baza wektorowa z dokumentami firmowymi + guardrails na wyjściu. To nie jest "albo albo", to "i".
+
+## Konkretna heurystyka na dobry start
+
+Zamiast matrycy decyzyjnej — prosta reguła:
+
+Zacznij od RAG. Prawie zawsze. Szybciej do czegoś działającego, łatwiej debugować, tańszy eksperyment.
+
+Po 4-6 tygodniach w produkcji zbierz przykłady złych odpowiedzi. Jeśli większość błędów to styl/ton/format — rozważ fine-tuning. Jeśli to błędne fakty lub brak wiedzy — popraw jakość dokumentów w RAG i chunking strategię. Jeśli i jedno i drugie — może potrzebujesz obu.
+
+Ta heurystyka ma granice. Wiedza dziedzinowa bardzo specyficzna i prywatna (np. tajne procedury w firmie, gdzie nie chcesz danych wysyłać do zewnętrznego API) może wymagać własnego modelu od początku. Ale to rzadki przypadek.
+
+---
+
+*Budujesz RAG od zera? W kolejnym artykule opisuję pełne wdrożenie — od parsowania dokumentów przez embeddingi do produkcyjnego vector store.*

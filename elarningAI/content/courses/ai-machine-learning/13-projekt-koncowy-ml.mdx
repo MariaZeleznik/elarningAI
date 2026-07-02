@@ -1,0 +1,251 @@
+﻿---
+title: Projekt końcowy - system rekomendacji filmów z ML
+module: 12
+order: 13
+free: false
+duration: 90
+exercise:
+  prompt: "Używając pandas, wczytaj dane o filmach jako słownik: movies = {'title': ['Film A','Film B','Film C'], 'genre': ['akcja','komedia','akcja'], 'rating': [8.1, 7.5, 8.5]}. Utwórz DataFrame i wydrukuj średnią ocenę per gatunek."
+  expected: "import pandas as pd\nmovies = {'title': ['Film A','Film B','Film C'], 'genre': ['akcja','komedia','akcja'], 'rating': [8.1, 7.5, 8.5]}\ndf = pd.DataFrame(movies)\nprint(df.groupby('genre')['rating'].mean())"
+  hint: "Stwórz DataFrame z pd.DataFrame(movies), następnie użyj groupby('genre')['rating'].mean()"
+  language: python
+---
+
+Ten projekt łączy wszystko z kursu w jeden spójny system. Nie jest to zabawka - to architektura którą możesz bezpośrednio zaadaptować do realnego projektu. Nie zakładam że zrobisz to w jeden dzień. Zaplanuj 2-3 tygodnie pracy.
+
+## Co budujemy
+
+System rekomendacji filmów, który:
+- Analizuje preferencje użytkownika na podstawie historii oglądania
+- Zwraca TOP-10 rekomendacji z wyjaśnieniem
+- Działa jako REST API
+- Jest monitarowany i może być aktualizowany
+
+## Krok 1: Dane i eksploracja
+
+```python
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+
+# Pobierz MovieLens 1M dataset (publicznie dostępny)
+# wget https://files.grouplens.org/datasets/movielens/ml-1m.zip
+
+# Wczytaj dane
+ratings = pd.read_csv('ml-1m/ratings.dat', sep='::', 
+                       names=['user_id', 'movie_id', 'rating', 'timestamp'],
+                       engine='python', encoding='latin-1')
+
+movies = pd.read_csv('ml-1m/movies.dat', sep='::',
+                      names=['movie_id', 'title', 'genres'],
+                      engine='python', encoding='latin-1')
+
+print(f"Oceny: {len(ratings):,}")
+print(f"Filmy: {len(movies):,}")
+print(f"Użytkownicy: {ratings['user_id'].nunique():,}")
+print(f"\nPróbka ocen:\n{ratings.head()}")
+
+# EDA
+print(f"\nRozkład ocen:")
+print(ratings['rating'].value_counts().sort_index())
+
+plt.figure(figsize=(10, 4))
+plt.subplot(1, 2, 1)
+ratings['rating'].hist(bins=10)
+plt.title('Rozkład ocen')
+plt.xlabel('Ocena')
+
+plt.subplot(1, 2, 2)
+ocen_per_film = ratings.groupby('movie_id').size()
+plt.hist(ocen_per_film, bins=50, log=True)
+plt.title('Liczba ocen per film (log scale)')
+plt.xlabel('Liczba ocen')
+plt.tight_layout()
+plt.savefig('eda.png')
+```
+
+## Krok 2: Content-Based Filtering
+
+```python
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
+
+# Przygotuj features dla każdego filmu
+movies['genre_str'] = movies['genres'].str.replace('|', ' ')
+
+tfidf = TfidfVectorizer(stop_words='english')
+tfidf_matrix = tfidf.fit_transform(movies['genre_str'])
+
+# Macierz podobieństwa (cosine similarity)
+cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+def get_similar_movies(title, n=10):
+    if title not in movies['title'].values:
+        return f"Nie znaleziono: {title}"
+    
+    idx = movies[movies['title'] == title].index[0]
+    scores = list(enumerate(cosine_sim[idx]))
+    scores = sorted(scores, key=lambda x: x[1], reverse=True)[1:n+1]
+    
+    movie_indices = [i[0] for i in scores]
+    result = movies.iloc[movie_indices][['title', 'genres']].copy()
+    result['similarity'] = [s[1] for s in scores]
+    return result
+
+print(get_similar_movies("Toy Story (1995)", n=5))
+```
+
+## Krok 3: Collaborative Filtering z Matrix Factorization
+
+```python
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+
+class RatingsDataset(Dataset):
+    def __init__(self, ratings_df):
+        self.users = torch.LongTensor(ratings_df['user_id'].values - 1)
+        self.movies = torch.LongTensor(ratings_df['movie_id'].values - 1)
+        # Normalizuj: 1-5 → 0-1
+        self.ratings = torch.FloatTensor((ratings_df['rating'].values - 1) / 4)
+    
+    def __len__(self): return len(self.ratings)
+    def __getitem__(self, idx): return self.users[idx], self.movies[idx], self.ratings[idx]
+
+class MatrixFactorization(nn.Module):
+    def __init__(self, n_users, n_movies, n_factors=50):
+        super().__init__()
+        self.user_emb = nn.Embedding(n_users, n_factors)
+        self.movie_emb = nn.Embedding(n_movies, n_factors)
+        self.user_bias = nn.Embedding(n_users, 1)
+        self.movie_bias = nn.Embedding(n_movies, 1)
+        
+        nn.init.normal_(self.user_emb.weight, std=0.01)
+        nn.init.normal_(self.movie_emb.weight, std=0.01)
+        nn.init.zeros_(self.user_bias.weight)
+        nn.init.zeros_(self.movie_bias.weight)
+    
+    def forward(self, user_ids, movie_ids):
+        u = self.user_emb(user_ids)
+        m = self.movie_emb(movie_ids)
+        ub = self.user_bias(user_ids).squeeze()
+        mb = self.movie_bias(movie_ids).squeeze()
+        return torch.sigmoid((u * m).sum(dim=1) + ub + mb)
+
+n_users = ratings['user_id'].max()
+n_movies = ratings['movie_id'].max()
+
+model = MatrixFactorization(n_users, n_movies, n_factors=50)
+dataset = RatingsDataset(ratings.sample(100000, random_state=42))  # subset dla szybkości
+loader = DataLoader(dataset, batch_size=2048, shuffle=True)
+
+optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+criterion = nn.MSELoss()
+
+for epoch in range(5):
+    model.train()
+    total_loss = 0
+    for user_ids, movie_ids, ratings_batch in loader:
+        optimizer.zero_grad()
+        pred = model(user_ids, movie_ids)
+        loss = criterion(pred, ratings_batch)
+        loss.backward()
+        optimizer.step()
+        total_loss += loss.item()
+    
+    print(f"Epoch {epoch+1}: avg loss = {total_loss/len(loader):.4f}")
+```
+
+## Krok 4: Hybrid System
+
+```python
+def hybrid_recommendations(user_id, n=10, alpha=0.6):
+    """
+    alpha: waga collaborative filtering (1-alpha: content-based)
+    """
+    # 1. Collaborative: co polubili podobni użytkownicy
+    cf_scores = get_cf_scores(user_id)  # z MatrixFactorization
+    
+    # 2. Content-based: filmy podobne do tych które lubił user
+    user_movies = get_user_top_movies(user_id)
+    cb_scores = get_cb_scores(user_movies, all_movies)  # z cosine similarity
+    
+    # 3. Hybrydyzacja: ważona suma
+    combined = alpha * cf_scores + (1 - alpha) * cb_scores
+    
+    # 4. Filtruj już obejrzane
+    watched = set(ratings[ratings['user_id'] == user_id]['movie_id'])
+    recommendations = {movie_id: score 
+                       for movie_id, score in combined.items() 
+                       if movie_id not in watched}
+    
+    top = sorted(recommendations.items(), key=lambda x: -x[1])[:n]
+    return [(movies[movies['movie_id'] == mid]['title'].values[0], score) 
+            for mid, score in top]
+```
+
+## Krok 5: API i deployment
+
+```python
+from fastapi import FastAPI
+from pydantic import BaseModel
+import joblib
+
+app = FastAPI(title="Movie Recommender API")
+
+class RecommendRequest(BaseModel):
+    user_id: int
+    n: int = 10
+    alpha: float = 0.6
+
+@app.post("/recommend")
+def recommend(req: RecommendRequest):
+    recs = hybrid_recommendations(req.user_id, req.n, req.alpha)
+    return {
+        "user_id": req.user_id,
+        "recommendations": [
+            {"title": title, "score": round(score, 3)} 
+            for title, score in recs
+        ]
+    }
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+```
+
+## Metryki ewaluacji systemów rekomendacji
+
+```python
+def precision_at_k(recommended, relevant, k=10):
+    recommended_k = recommended[:k]
+    hits = len(set(recommended_k) & set(relevant))
+    return hits / k
+
+def recall_at_k(recommended, relevant, k=10):
+    recommended_k = recommended[:k]
+    hits = len(set(recommended_k) & set(relevant))
+    return hits / len(relevant) if relevant else 0
+
+def ndcg_at_k(recommended, relevant, k=10):
+    dcg = sum([1/np.log2(i+2) for i, movie in enumerate(recommended[:k]) if movie in relevant])
+    ideal_dcg = sum([1/np.log2(i+2) for i in range(min(k, len(relevant)))])
+    return dcg / ideal_dcg if ideal_dcg > 0 else 0
+```
+
+## Co dalej po tym projekcie
+
+Po ukończeniu tego projektu masz:
+- Działający system rekomendacji z dwoma algorytmami
+- REST API do serwowania rekomendacji
+- Zrozumienie trade-offs między CF, CB i hybrydą
+- Podstawy ewaluacji systemów rekomendacji
+
+**Możliwe rozszerzenia:**
+- Neural Collaborative Filtering (NCF) - sieć neuronowa zamiast MF
+- Real-time recommendations z Apache Kafka
+- A/B testing różnych strategii rekomendacji
+- Cold start problem - co pokazać nowym użytkownikom bez historii
+
+Gratulacje! Ukończyłeś kurs AI i Machine Learning. Czas na egzamin certyfikacyjny.

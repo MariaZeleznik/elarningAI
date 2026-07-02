@@ -1,0 +1,141 @@
+Jeden z projektów sprzed kilku kwartałów to wewnętrzny asystent dla działu prawnego 200-osobowej firmy. Prawnicy mogli zadawać pytania po polsku, system przeszukiwał setki kontraktów, regulaminów i wewnętrznych procedur, i odpowiadał — z cytowaniem konkretnego paragrafu z konkretnego dokumentu.
+
+Czas odpowiedzi: 2–4 sekundy. Dokładność na zestawie testowym: 91%. Poprzednie "rozwiązanie": 15 minut szukania w SharePoincie i zwykle pytanie do koleżanki z innego piętra.
+
+To jest RAG. I właśnie chcę pokazać jak go zbudować — krok po kroku, z prawdziwym kodem.
+
+## Co to RAG i dlaczego działa
+
+RAG (Retrieval-Augmented Generation) rozwiązuje problem wiedzy LLM. Model jest trenowany do konkretnej daty i nic nie wie o Twoich firmowych dokumentach. Co robisz?
+
+Opcja 1: fine-tuning. Drogi, wymaga danych, wynik nieprzewidywalny (model zapamiętuje styl, nie fakty).
+
+Opcja 2: wrzucić wszystkie dokumenty do kontekstu. Niemożliwe dla setek stron, drogie przy każdym zapytaniu.
+
+Opcja 3 (RAG): przed każdym zapytaniem wyszukaj najbardziej podobne fragmenty z bazy dokumentów, dorzuć je do kontekstu LLM, pozwól modelowi odpowiedzieć na podstawie tego kontekstu. Model nie musi "wiedzieć" całej dokumentacji — musi umieć odpowiedzieć mając właściwy kontekst pod nosem.
+
+## Etap 1: Wczytaj dokumenty
+
+Różne formaty wymagają różnych parserów. Podstawowy zestaw:
+
+```python
+from langchain_community.document_loaders import (
+    PyPDFLoader,
+    Docx2txtLoader,
+    TextLoader,
+)
+
+def load_document(file_path: str):
+    if file_path.endswith('.pdf'):
+        return PyPDFLoader(file_path).load()
+    elif file_path.endswith('.docx'):
+        return Docx2txtLoader(file_path).load()
+    else:
+        return TextLoader(file_path, encoding='utf-8').load()
+```
+
+Jeśli Twoje PDFy to skany bez warstwy tekstowej — potrzebujesz OCR. `pytesseract` dla prostych przypadków, Azure Document Intelligence lub AWS Textract dla lepszej jakości (szczególnie przy różnych językach i handwritingu).
+
+## Etap 2: Chunking — najtrudniejsza część
+
+Chunking to podział dokumentów na fragmenty. I jest to, moim zdaniem, najtrudniejszy element całego RAG — dużo ważniejszy niż wybór modelu embeddings.
+
+Zbyt małe chunki: fragmenty bez kontekstu. Zdanie "Umowa wchodzi w życie następnego dnia" bez wiedzy co jest w paragrafie wcześniej — bezużyteczne.
+
+Zbyt duże chunki: mniej precyzyjne wyszukiwanie. Jeśli chunk to cały rozdział, wyszukujesz rozdział na pytanie o jeden paragraf.
+
+Cztery strategie, od prostej do złożonej:
+
+**Fixed-size z overlapem** — dzielisz co N znaków z zachodzącym oknem. Najprostsze. Nie respektuje struktury dokumentu, ale działa jako baseline.
+
+```python
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+
+splitter = RecursiveCharacterTextSplitter(
+    chunk_size=500,
+    chunk_overlap=50,
+    separators=["\n\n", "\n", ". ", " "],
+)
+chunks = splitter.split_documents(documents)
+```
+
+**Strukturalne** — dzielisz na granicach semantycznych: nagłówki, paragrafy, artykuły. Wymaga parsowania struktury dokumentu. Dla dobrze sformatowanych dokumentów (Word, dobrze zrobione PDF) to najlepsza opcja.
+
+**Hierarchiczne (Parent-Child)** — małe chunki do wyszukiwania, duże do przekazania do modelu. Wyszukujesz po małych fragmentach (precyzja), ale kontekst dla modelu to większy "rodzic". Najlepsze wyniki, najbardziej złożone.
+
+Moja rekomendacja na start: `RecursiveCharacterTextSplitter` z chunk_size=400–600 i overlap=50–100. Zacznij od tego i mierz jakość odpowiedzi.
+
+## Etap 3: Embeddings i baza wektorowa
+
+Embeddingi to konwersja tekstu na wektor liczb — reprezentację semantyczną. Podobne semantycznie fragmenty mają podobne wektory. Wyszukiwanie to znajdowanie wektorów blisko wektora pytania.
+
+Polecane modele embeddingów:
+- `text-embedding-3-small` od OpenAI — dobry balans ceny i jakości dla angielskiego
+- `multilingual-e5-large` — gdy masz treści po polsku i angielsku (polecam dla polskich projektów)
+
+```python
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import Chroma
+
+embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+
+# Tworzy bazę wektorową i indeksuje dokumenty
+vectorstore = Chroma.from_documents(
+    documents=chunks,
+    embedding=embeddings,
+    persist_directory="./chroma_db",
+)
+```
+
+Dla małych projektów (do ~10 000 chunków) Chroma jest OK. Przy większej skali warto spojrzeć na Qdrant (self-hosted) lub Pinecone (managed).
+
+## Etap 4: Retrieval i generowanie odpowiedzi
+
+```python
+from langchain_openai import ChatOpenAI
+from langchain.chains import RetrievalQA
+from langchain.prompts import PromptTemplate
+
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+prompt = PromptTemplate(
+    template="""Odpowiedz na pytanie na podstawie poniższego kontekstu. 
+Jeśli informacja nie jest w kontekście, powiedz "Nie mam tej informacji 
+w dostępnych dokumentach." — nie wymyślaj odpowiedzi.
+
+Kontekst:
+{context}
+
+Pytanie: {question}
+
+Odpowiedź:""",
+    input_variables=["context", "question"],
+)
+
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=vectorstore.as_retriever(search_kwargs={"k": 4}),
+    chain_type_kwargs={"prompt": prompt},
+    return_source_documents=True,
+)
+
+result = qa_chain.invoke({"query": "Kiedy umowa wchodzi w życie?"})
+print(result["result"])
+print("\nŹródła:", [doc.metadata for doc in result["source_documents"]])
+```
+
+Kluczowe elementy tego promptu: jawna instrukcja żeby nie wymyślać odpowiedzi gdy informacji nie ma. To jest fundamentalne — bez tego model będzie halucynować z przekonującym brzmieniem.
+
+`k=4` to liczba fragmentów do pobrania. Eksperymentuj: zbyt mało = brak kontekstu, zbyt dużo = rozcieńczony kontekst i wyższy koszt.
+
+## Ewaluacja: skąd wiesz że to działa
+
+Zbuduj zestaw testowy: 50–100 pytań z oczekiwanymi odpowiedziami (lub przynajmniej z wiedzą które dokumenty powinny być cytowane).
+
+Mierz dwie rzeczy: retrieval precision (czy wyszukiwane fragmenty są właściwe dla pytania?) i answer quality (czy odpowiedź jest poprawna i kompletna?). Możesz użyć LLM-as-a-judge do automatycznej oceny jakości odpowiedzi.
+
+Najczęstszy błąd: optymalizowanie modelu LLM gdy problem jest w retrieval. Jeśli model dostaje złe fragmenty — nawet najlepszy LLM da złą odpowiedź. Sprawdź najpierw co retriever faktycznie zwraca dla Twoich pytań testowych.
+
+---
+
+*Masz pytania o konkretne aspekty wdrożenia? Opisuję też jak połączyć RAG z fine-tuningiem i kiedy to ma sens.*

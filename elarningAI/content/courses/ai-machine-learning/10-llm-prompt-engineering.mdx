@@ -1,0 +1,210 @@
+﻿---
+title: LLM i Prompt Engineering - jak efektywnie używać modeli językowych
+module: 9
+order: 10
+free: false
+duration: 65
+exercise:
+  prompt: "Używając biblioteki anthropic, wyślij zapytanie do modelu claude-haiku-4-5-20251001 z systemem 'Jesteś ekspertem Python' i wiadomością 'Wyjaśnij list comprehension w jednym zdaniu'. Wydrukuj odpowiedź. (Zakładamy że ANTHROPIC_API_KEY jest ustawiony)"
+  expected: "import anthropic\nclient = anthropic.Anthropic()\nmessage = client.messages.create(\n    model='claude-haiku-4-5-20251001',\n    max_tokens=256,\n    system='Jesteś ekspertem Python',\n    messages=[{'role': 'user', 'content': 'Wyjaśnij list comprehension w jednym zdaniu'}]\n)\nprint(message.content[0].text)"
+  hint: "Użyj anthropic.Anthropic(), następnie client.messages.create() z parametrami model, max_tokens, system i messages"
+  language: python
+---
+
+Pierwsze promptowanie LLM, które robiłam, wyglądało tak: "Napisz mi tekst o AI". Wynik był... generyczny. Zajęło mi kilka tygodni żeby zrozumieć, że LLM jest jak bardzo utalentowany asystent który nie wie co chcesz, dopóki mu dokładnie nie powiesz. Prompt engineering to sztuka mówienia asystentowi co dokładnie chcesz.
+
+## Czym jest LLM (Large Language Model)?
+
+LLM to transformer wytrenowany na setkach miliardów tokenów tekstu. Model uczy się przewidywać następny token - ale przy wystarczająco dużej skali i danych emergentnie pojawiają się zdolności: rozumowanie, pisanie kodu, tłumaczenie.
+
+| Model | Producent | Kontekst | Zastosowanie |
+|-------|-----------|---------|--------------|
+| GPT-4o | OpenAI | 128K tokenów | Wszechstronny, widzi obrazy |
+| Claude Sonnet 4.6 | Anthropic | 200K tokenów | Kod, analiza, bezpieczeństwo |
+| Gemini 1.5 Pro | Google | 1M tokenów | Dokumenty, wideo |
+| Llama 3.1 70B | Meta (open) | 128K | Self-hosting, fine-tuning |
+
+## Podstawy API - Anthropic Claude
+
+```python
+import anthropic
+
+client = anthropic.Anthropic()  # klucz z ANTHROPIC_API_KEY
+
+# Podstawowe zapytanie
+message = client.messages.create(
+    model="claude-haiku-4-5-20251001",   # najtańszy, szybki
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Wyjaśnij transformer w 3 zdaniach"}]
+)
+print(message.content[0].text)
+print(f"\nTokeny: {message.usage.input_tokens} wejście, {message.usage.output_tokens} wyjście")
+```
+
+## System prompt - podstawa dobrego promptowania
+
+System prompt definiuje kontekst, rolę i styl odpowiedzi. To różnica między asystentem ogólnym a ekspertem domenowym:
+
+```python
+# System prompt dla asystenta Python
+system_python = """
+Jesteś ekspertem Python z 10-letnim doświadczeniem.
+- Zawsze pokazuj działający kod z przykładem użycia
+- Wyjaśniaj co robi każda linia w komentarzach
+- Wskazuj potencjalne błędy i edge cases
+- Odpowiadaj po polsku
+"""
+
+message = client.messages.create(
+    model="claude-haiku-4-5-20251001",
+    max_tokens=1024,
+    system=system_python,
+    messages=[{"role": "user", "content": "Jak posortować listę słowników po kluczu 'cena'?"}]
+)
+print(message.content[0].text)
+```
+
+## Techniki prompt engineeringu
+
+### 1. Few-shot learning - przykłady w prompcie
+
+```python
+few_shot_prompt = """
+Klasyfikuj sentyment recenzji jako POZYTYWNY, NEGATYWNY lub NEUTRALNY.
+
+Przykłady:
+Recenzja: "Świetny produkt, szybka dostawa!" → POZYTYWNY
+Recenzja: "Kompletna katastrofa, totalna strata pieniędzy." → NEGATYWNY
+Recenzja: "Przyszedł na czas, zgodny z opisem." → NEUTRALNY
+
+Teraz sklasyfikuj:
+Recenzja: "{recenzja}" → """
+
+recenzja = "Jakość mogłaby być lepsza za tę cenę, ale w sumie spełnia swoje zadanie."
+message = client.messages.create(
+    model="claude-haiku-4-5-20251001",
+    max_tokens=10,
+    messages=[{"role": "user", "content": few_shot_prompt.format(recenzja=recenzja)}]
+)
+print(message.content[0].text)  # NEUTRALNY
+```
+
+### 2. Chain of Thought (CoT) - krok po kroku
+
+Przy problemach logicznych, wymuszenie kroków znacznie poprawia jakość:
+
+```python
+# BEZ CoT:
+prompt_bad = "Ile wynosi 17 × 24?"
+
+# Z CoT:
+prompt_cot = """
+Oblicz 17 × 24. Rozwiąż krok po kroku, pokazując obliczenia.
+"""
+
+# Przykład odpowiedzi CoT:
+# 17 × 24 = 17 × 20 + 17 × 4
+#         = 340 + 68
+#         = 408
+```
+
+### 3. Structured output - parsowanie JSON
+
+```python
+import json
+
+prompt_json = """
+Wyodrębnij dane kontaktowe z poniższego tekstu i zwróć jako JSON.
+
+Tekst: "Proszę skontaktować się z Anną Kowalską pod numerem +48 123 456 789 
+lub mailowo: a.kowalska@firma.pl. Firma mieści się przy ul. Warszawskiej 15, Kraków."
+
+Zwróć TYLKO JSON w formacie:
+{
+  "imie": "...",
+  "nazwisko": "...",
+  "telefon": "...",
+  "email": "...",
+  "adres": "..."
+}
+"""
+
+message = client.messages.create(
+    model="claude-haiku-4-5-20251001",
+    max_tokens=256,
+    messages=[{"role": "user", "content": prompt_json}]
+)
+
+try:
+    dane = json.loads(message.content[0].text)
+    print(f"Email: {dane['email']}")
+    print(f"Telefon: {dane['telefon']}")
+except json.JSONDecodeError:
+    print("Model nie zwrócił poprawnego JSON")
+```
+
+## Konwersacja wieloturowa
+
+```python
+historia = []
+
+def chat(user_message):
+    historia.append({"role": "user", "content": user_message})
+    
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system="Jesteś tutorem Python. Odpowiadaj krótko i zwięźle.",
+        messages=historia,
+    )
+    
+    answer = response.content[0].text
+    historia.append({"role": "assistant", "content": answer})
+    return answer
+
+print(chat("Co to jest list comprehension?"))
+print(chat("Pokaż przykład z warunkiem if"))
+print(chat("A jak to działa dla słowników?"))
+# Każde pytanie zna kontekst poprzednich!
+```
+
+## Streaming - odpowiedzi na żywo
+
+```python
+# Zamiast czekać na całą odpowiedź, wyświetlaj tokeny na bieżąco
+with client.messages.stream(
+    model="claude-sonnet-4-6",
+    max_tokens=1024,
+    messages=[{"role": "user", "content": "Wyjaśnij backpropagation"}],
+) as stream:
+    for text in stream.text_stream:
+        print(text, end="", flush=True)
+    print()  # nowa linia na końcu
+```
+
+## Koszty i optymalizacja
+
+```python
+# Przelicznik kosztów Anthropic (przybliżone, 2025):
+# claude-haiku-4-5: $0.25/M input tokens, $1.25/M output tokens
+# claude-sonnet-4-6: $3/M input tokens, $15/M output tokens
+
+def szacuj_koszt(input_tokens, output_tokens, model='haiku'):
+    if model == 'haiku':
+        return input_tokens * 0.00025/1000 + output_tokens * 0.00125/1000
+    elif model == 'sonnet':
+        return input_tokens * 0.003/1000 + output_tokens * 0.015/1000
+
+# 1000 zapytań po 500 tokenów wejścia i 300 wyjścia:
+koszt = szacuj_koszt(500*1000, 300*1000, 'haiku')
+print(f"Szacowany koszt 1000 zapytań: ${koszt:.2f}")  # ~$0.50
+```
+
+**Zasady dobrego prompt engineeringu:**
+1. Bądź konkretny - nie "napisz o X", ale "napisz 200-słowne wyjaśnienie X dla studenta z zerowym doświadczeniem"
+2. Podaj format wyjścia - JSON, lista, paragraf
+3. Testuj i iteruj - dobry prompt to zwykle 3-5 wersja
+4. Używaj systemowego promptu do persona, nie do zadania
+5. Przy złożonych zadaniach - rozdziel na kilka mniejszych zapytań
+
+Następna lekcja: RAG i Agenty AI - jak budować systemy które rozumieją własne dokumenty.

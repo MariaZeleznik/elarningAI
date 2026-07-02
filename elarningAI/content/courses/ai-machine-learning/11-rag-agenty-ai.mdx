@@ -1,0 +1,185 @@
+﻿---
+title: RAG i Agenty AI - systemy z pamięcią i narzędziami
+module: 10
+order: 11
+free: false
+duration: 60
+exercise:
+  prompt: "Używając langchain_text_splitters, podziel poniższy tekst na chunki o max 100 znaków z overlapem 20 znaków. Tekst = 'Machine learning to dziedzina AI która uczy komputery na podstawie danych bez jawnego programowania regul.' Wydrukuj liczbę chunków."
+  expected: "from langchain_text_splitters import RecursiveCharacterTextSplitter\nsplitter = RecursiveCharacterTextSplitter(chunk_size=100, chunk_overlap=20)\ntekst = 'Machine learning to dziedzina AI która uczy komputery na podstawie danych bez jawnego programowania regul.'\nchunks = splitter.split_text(tekst)\nprint(len(chunks))"
+  hint: "Użyj RecursiveCharacterTextSplitter z parametrami chunk_size i chunk_overlap, następnie split_text()"
+  language: python
+---
+
+Przez długi czas myślałam, że główna wartość LLM to ogólna wiedza zapisana w wagach modelu. Potem trafiłam na problem: klient miał 10 000 stron dokumentacji i chciał żeby chatbot odpowiadał na pytania. Model GPT-4 znał świat do 2023 roku - ale nie znał JEGO dokumentacji. Tak wpadłam w RAG.
+
+## Problem: LLM nie zna Twoich danych
+
+LLM jest wytrenowany na danych do pewnej daty. Nie wie:
+- Co zawierają Twoje dokumenty firmowe
+- Co zmieniło się po data cutoff
+- Specyficznej wiedzy domenowej której nie ma w internecie
+
+**Rozwiązania:**
+1. Fine-tuning - drogi, wymaga danych treningowych, powolny
+2. **RAG (Retrieval-Augmented Generation)** - szybki, elastyczny, łatwy do aktualizacji
+
+## RAG - jak działa
+
+```
+Pytanie użytkownika: "Jaki jest okres gwarancji produktu X?"
+         ↓
+[1. Embedding pytania] → wektor zapytania
+         ↓
+[2. Wyszukiwanie w wektorowej bazie danych]
+   → Top 3 najbardziej podobnych fragmentów dokumentacji
+         ↓
+[3. Kontekst + pytanie → LLM]
+   Prompt: "Oto fragmenty dokumentacji: {context}. Odpowiedz na pytanie: {question}"
+         ↓
+[4. Odpowiedź oparta na prawdziwej dokumentacji]
+   "Produkt X ma 24 miesiące gwarancji zgodnie z rozdziałem 3.2 instrukcji."
+```
+
+## Implementacja RAG krok po kroku
+
+```python
+# pip install langchain langchain-anthropic langchain-community chromadb
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma
+from langchain_anthropic import AnthropicEmbeddings, ChatAnthropic
+from langchain.chains import RetrievalQA
+
+# === Krok 1: Dokumenty ===
+dokumenty = [
+    "Produkt X ma 24 miesiące gwarancji. Gwarancja obejmuje wady fabryczne.",
+    "Produkt Y ma 12 miesięcy gwarancji. Nie obejmuje uszkodzeń mechanicznych.",
+    "Reklamacje należy składać przez formularz online lub telefonicznie pod 800-123-456.",
+    "Czas realizacji zwrotu to 14 dni roboczych od otrzymania towaru.",
+    "Produkty premium mają przedłużoną gwarancję do 36 miesięcy za dopłatą.",
+]
+
+# === Krok 2: Chunking ===
+splitter = RecursiveCharacterTextSplitter(chunk_size=200, chunk_overlap=50)
+chunks = splitter.create_documents(dokumenty)
+print(f"Chunks: {len(chunks)}")
+
+# === Krok 3: Embeddingi + Vector Store ===
+# W produkcji użyj OpenAI embeddings lub sentence-transformers
+from langchain_community.embeddings import HuggingFaceEmbeddings
+
+embeddings = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
+vectorstore = Chroma.from_documents(chunks, embeddings)
+
+# === Krok 4: Retrieval ===
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+
+# Przetestuj retrieval
+docs = retriever.invoke("gwarancja produktu X")
+for doc in docs:
+    print(f"→ {doc.page_content[:80]}...")
+```
+
+## Agenty AI - LLM z narzędziami
+
+RAG to wyszukiwanie + odpowiadanie. Agent idzie dalej: **planuje kroki, używa narzędzi, wykonuje akcje**.
+
+```python
+import anthropic
+import json
+
+client = anthropic.Anthropic()
+
+# Definicje narzędzi
+tools = [
+    {
+        "name": "search_database",
+        "description": "Wyszukuje produkty w bazie danych",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "Fraza wyszukiwania"},
+                "max_price": {"type": "number", "description": "Maksymalna cena"},
+            },
+            "required": ["query"]
+        }
+    },
+    {
+        "name": "get_weather",
+        "description": "Pobiera aktualną pogodę dla podanego miasta",
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city": {"type": "string"},
+            },
+            "required": ["city"]
+        }
+    }
+]
+
+# Symulacja działania narzędzi
+def execute_tool(name, inputs):
+    if name == "search_database":
+        return [{"id": 1, "name": "Laptop Dell", "price": 2999}, {"id": 2, "name": "Laptop HP", "price": 3499}]
+    elif name == "get_weather":
+        return {"city": inputs["city"], "temp": 22, "condition": "Słonecznie"}
+
+# Pętla agenta
+messages = [{"role": "user", "content": "Znajdź laptop poniżej 3500 PLN i podaj też pogodę w Warszawie"}]
+
+while True:
+    response = client.messages.create(
+        model="claude-haiku-4-5-20251001",
+        max_tokens=1024,
+        tools=tools,
+        messages=messages,
+    )
+    
+    if response.stop_reason == "end_turn":
+        # Agent zakończył
+        print("\nOdpowiedź końcowa:")
+        print(response.content[0].text)
+        break
+    
+    # Wykonaj narzędzia które agent wybrał
+    tool_results = []
+    for block in response.content:
+        if block.type == "tool_use":
+            print(f"Agent wywołuje: {block.name}({block.input})")
+            result = execute_tool(block.name, block.input)
+            tool_results.append({
+                "type": "tool_result",
+                "tool_use_id": block.id,
+                "content": json.dumps(result, ensure_ascii=False),
+            })
+    
+    # Dodaj odpowiedź agenta i wyniki narzędzi do historii
+    messages.append({"role": "assistant", "content": response.content})
+    messages.append({"role": "user", "content": tool_results})
+```
+
+## Wektorowe bazy danych - porównanie
+
+| Baza | Hosting | Plusy | Minusy |
+|------|---------|-------|--------|
+| ChromaDB | Lokalny / Docker | Darmowy, łatwy start | Nie skalowalny |
+| Pinecone | Cloud | Skalowalny, szybki | Płatny |
+| Weaviate | Self-hosted / Cloud | Open source, bogate API | Konfiguracja |
+| pgvector | PostgreSQL extension | Integracja z istniejącą DB | Wolniejszy od specjalizowanych |
+
+Na start: **ChromaDB** lokalnie. W produkcji: **Pinecone** lub **pgvector** jeśli masz PostgreSQL.
+
+## Kiedy RAG, kiedy fine-tuning?
+
+| Sytuacja | RAG | Fine-tuning |
+|----------|-----|-------------|
+| Często aktualizowane dane | ✅ Dodaj dokumenty do VectorDB | ❌ Wymaga re-treningu |
+| Faktyczna wiedza firmowa | ✅ Idealne | ❌ Model może "halucynować" |
+| Zmiana stylu/zachowania modelu | ❌ Słabe | ✅ Idealne |
+| Szybki start | ✅ Dni | ❌ Tygodnie |
+| Koszt | ✅ Niska | ❌ Wysoka |
+
+**Złota reguła:** zacznij od RAG. Fine-tuning wtedy gdy RAG nie wystarczy do zmiany zachowania modelu.
+
+Następna lekcja: MLOps - deployment, monitoring i utrzymanie modeli ML w produkcji.

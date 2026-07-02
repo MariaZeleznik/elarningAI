@@ -1,0 +1,234 @@
+﻿---
+title: MLOps - deployment i monitoring modeli ML w produkcji
+module: 11
+order: 12
+free: false
+duration: 55
+exercise:
+  prompt: "Zapisz prosty model scikit-learn (LinearRegression wytrenowany na X=[[1],[2],[3]], y=[2,4,6]) do pliku 'model.pkl' używając joblib, a następnie wczytaj go i zrób predykcję dla X=[[5]]. Wydrukuj wynik."
+  expected: "from sklearn.linear_model import LinearRegression\nimport joblib\nimport numpy as np\nX = np.array([[1],[2],[3]])\ny = np.array([2,4,6])\nmodel = LinearRegression().fit(X, y)\njoblib.dump(model, 'model.pkl')\nloaded = joblib.load('model.pkl')\nprint(loaded.predict([[5]]))"
+  hint: "Użyj joblib.dump() do zapisu i joblib.load() do wczytania, następnie predict()"
+  language: python
+---
+
+Napisanie modelu który osiąga 95% accuracy na Jupyter Notebooku to jedno. Sprawienie żeby ten model działał w produkcji - obsługiwał zapytania użytkowników, degradował się gracefully przy złych danych, był monitarowany i aktualizowany - to zupełnie inna gra. MLOps to sztuka łączenia tych dwóch światów.
+
+## Co to jest MLOps i dlaczego ważne
+
+MLOps (Machine Learning Operations) = praktyki które sprawiają, że modele ML:
+- Są wdrażane szybko i bezpiecznie
+- Działają stabilnie w produkcji
+- Są monitorowane pod kątem degradacji
+- Mogą być łatwo aktualizowane
+
+Bez MLOps: "działa na moim laptopie" → koszmar w produkcji.
+
+## Zapisywanie i wczytywanie modeli
+
+```python
+import joblib
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.datasets import load_iris
+import numpy as np
+
+# Trening
+X, y = load_iris(return_X_y=True)
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+model.fit(X, y)
+
+# Zapis
+joblib.dump(model, 'iris_model.pkl')
+print("Model zapisany!")
+
+# Wczytanie (np. w innym procesie/serwerze)
+loaded_model = joblib.load('iris_model.pkl')
+sample = np.array([[5.1, 3.5, 1.4, 0.2]])
+pred = loaded_model.predict(sample)
+prob = loaded_model.predict_proba(sample)
+print(f"Predykcja: {pred[0]}, prawdopodobieństwo: {prob[0].max():.2%}")
+```
+
+## API modelu z FastAPI
+
+```python
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel
+import joblib
+import numpy as np
+import uvicorn
+
+app = FastAPI(title="Iris Classifier API", version="1.0")
+model = joblib.load('iris_model.pkl')
+class_names = ['setosa', 'versicolor', 'virginica']
+
+class PredictRequest(BaseModel):
+    sepal_length: float
+    sepal_width: float
+    petal_length: float
+    petal_width: float
+
+class PredictResponse(BaseModel):
+    class_name: str
+    class_id: int
+    confidence: float
+
+@app.get("/health")
+def health():
+    return {"status": "ok", "model_loaded": model is not None}
+
+@app.post("/predict", response_model=PredictResponse)
+def predict(req: PredictRequest):
+    features = np.array([[req.sepal_length, req.sepal_width, req.petal_length, req.petal_width]])
+    
+    if np.any(features < 0) or np.any(features > 20):
+        raise HTTPException(status_code=422, detail="Wartości poza zakresem")
+    
+    class_id = int(model.predict(features)[0])
+    confidence = float(model.predict_proba(features)[0].max())
+    
+    return PredictResponse(
+        class_name=class_names[class_id],
+        class_id=class_id,
+        confidence=confidence,
+    )
+
+# Uruchom: uvicorn app:app --host 0.0.0.0 --port 8000
+```
+
+## Docker - pakowanie modelu
+
+```dockerfile
+# Dockerfile
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY iris_model.pkl .
+COPY app.py .
+
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+```
+
+```bash
+# Buduj i uruchom
+docker build -t iris-classifier:v1 .
+docker run -p 8000:8000 iris-classifier:v1
+
+# Test
+curl -X POST http://localhost:8000/predict \
+  -H "Content-Type: application/json" \
+  -d '{"sepal_length": 5.1, "sepal_width": 3.5, "petal_length": 1.4, "petal_width": 0.2}'
+```
+
+## Monitoring - data drift i concept drift
+
+```python
+import numpy as np
+from scipy import stats
+
+def detect_data_drift(train_data, prod_data, alpha=0.05):
+    """Wykrywa zmianę rozkładu między danymi treningowymi a produkcyjnymi."""
+    drift_detected = {}
+    for col in range(train_data.shape[1]):
+        stat, p_value = stats.ks_2samp(train_data[:, col], prod_data[:, col])
+        drift_detected[f'feature_{col}'] = {
+            'drift': p_value < alpha,
+            'p_value': round(p_value, 4),
+        }
+    return drift_detected
+
+# Symulacja
+np.random.seed(42)
+train_data = np.random.normal(0, 1, (1000, 4))
+prod_data_ok = np.random.normal(0, 1, (200, 4))   # brak driftu
+prod_data_drift = np.random.normal(1, 1.5, (200, 4))  # drift!
+
+print("Brak driftu:")
+print(detect_data_drift(train_data, prod_data_ok))
+
+print("\nDrift wykryty:")
+print(detect_data_drift(train_data, prod_data_drift))
+```
+
+## MLflow - śledzenie eksperymentów
+
+```python
+import mlflow
+import mlflow.sklearn
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import accuracy_score, f1_score
+from sklearn.datasets import load_iris
+
+X, y = load_iris(return_X_y=True)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# Eksperyment
+mlflow.set_experiment("iris_classification")
+
+with mlflow.start_run():
+    # Parametry
+    n_estimators = 100
+    max_depth = 10
+    
+    mlflow.log_param("n_estimators", n_estimators)
+    mlflow.log_param("max_depth", max_depth)
+    
+    # Trening
+    model = RandomForestClassifier(n_estimators=n_estimators, max_depth=max_depth, random_state=42)
+    model.fit(X_train, y_train)
+    
+    # Metryki
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
+    f1 = f1_score(y_test, y_pred, average='macro')
+    
+    mlflow.log_metric("accuracy", accuracy)
+    mlflow.log_metric("f1_macro", f1)
+    
+    # Zapis modelu
+    mlflow.sklearn.log_model(model, "model")
+    
+    print(f"Accuracy: {accuracy:.2%}, F1: {f1:.2%}")
+    print(f"Run ID: {mlflow.active_run().info.run_id}")
+
+# mlflow ui  →  http://localhost:5000 - przeglądarka eksperymentów
+```
+
+## Continuous Training Pipeline
+
+```python
+# Pseudokod dla automatycznego re-treningu
+def training_pipeline():
+    """
+    Uruchamiany cyklicznie (np. co tydzień):
+    1. Pobierz nowe dane z bazy produkcyjnej
+    2. Połącz z danymi historycznymi
+    3. Trenuj nowy model
+    4. Porównaj z aktualnym modelem na zbiorze walidacyjnym
+    5. Jeśli nowy model lepszy → deploy
+    """
+    new_data = fetch_production_data(last_n_days=7)
+    historical_data = load_historical_data()
+    
+    X_train, y_train = prepare_features(historical_data + new_data)
+    X_val, y_val = load_validation_set()
+    
+    new_model = train_model(X_train, y_train)
+    current_model = load_production_model()
+    
+    new_accuracy = evaluate(new_model, X_val, y_val)
+    current_accuracy = evaluate(current_model, X_val, y_val)
+    
+    if new_accuracy > current_accuracy + 0.01:  # 1% próg
+        deploy_model(new_model)
+        notify_team(f"Nowy model deployer: {new_accuracy:.2%} vs {current_accuracy:.2%}")
+    else:
+        log_result("Model nie poprawiony, bez deploy")
+```
+
+Następna lekcja: Projekt końcowy - budowa kompletnego systemu ML od danych do produkcji.

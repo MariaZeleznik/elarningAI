@@ -1,0 +1,140 @@
+﻿Rok temu napisałbym inny artykuł. Rok temu byłem sceptyczny wobec Polars - "kolejna biblioteka, która 'jest szybsza niż pandas', ale za 6 miesięcy wszyscy wrócą do starych nawyków."
+
+Teraz, po przetestowaniu Polars na 4 realnych projektach, muszę powiedzieć wprost: **Polars jest lepszy od pandas w większości scenariuszy produkcyjnych.** To nie znaczy, że pandas znika - ale zmieniam zdanie i chcę wyjaśnić dlaczego.
+
+## Co to Polars i dlaczego jest szybki
+
+Polars to biblioteka DataFrame napisana w Rust, z API w Pythonie. Zaprojektowana od zera z myślą o wielowątkowości i dużych danych.
+
+Trzy powody, dla których jest szybsza:
+
+**1. Wielowątkowość po wyjęciu z pudełka.** pandas wykonuje operacje sekwencyjnie (pomijam pandas 2.0 i copy-on-write). Polars automatycznie distribuuje operacje na wszystkie dostępne rdzenie CPU. Na 8-rdzeniowym laptopie to potencjalnie 8× przyspieszenie na właściwych operacjach.
+
+**2. Lazy evaluation.** Polars ma tryb "leniwy" (lazy), gdzie budujesz plan zapytania, a framework sam optymalizuje wykonanie. Podobnie do Spark - nie wykonujesz każdej operacji natychmiast, tylko budujesz plan i wykonujesz go na raz.
+
+**3. Zarządzanie pamięcią.** Polars używa Apache Arrow jako formatu wewnętrznego - efektywnego kolumnowego formatu pamięci. Mniej kopii danych, mniejszy footprint pamięci, lepszy cache hit rate na CPU.
+
+## Benchmark na realnych danych
+
+Nie przepadam za micro-benchmarkami na syntetycznych danych, więc podzielę się wynikiem z projektu.
+
+Zbiór: tabela logów użytkowników, 45 milionów wierszy, 12 kolumn. Operacja: group by user_id + event_type, count + max timestamp, filter na ostatnie 30 dni.
+
+| Biblioteka | Czas | RAM |
+|-----------|------|-----|
+| pandas 2.1 | 47.3 s | 8.2 GB |
+| pandas 2.1 + kategoryczne typy | 31.1 s | 4.1 GB |
+| Polars (eager) | 4.8 s | 3.3 GB |
+| Polars (lazy + streaming) | 3.2 s | 1.1 GB |
+
+Polars w trybie lazy + streaming: **15× szybszy**, **7× mniej RAM** niż standardowy pandas. Na danych, które *nie mieszczą się w RAM* na maszynie 8 GB - Polars działa, pandas crashuje.
+
+## API: podobne, ale inne
+
+Jeśli znasz pandas, Polars będzie znajomy - ale z ważnymi różnicami.
+
+### Podstawowe operacje
+
+```python
+import polars as pl
+import pandas as pd
+
+# pandas
+df_pd = pd.read_csv("data.csv")
+result_pd = (df_pd
+    .assign(month=pd.to_datetime(df_pd['date']).dt.month)
+    .groupby(['customer_id', 'month'])['revenue']
+    .sum()
+    .reset_index()
+)
+
+# Polars - bardziej "SQL-like"
+df_pl = pl.read_csv("data.csv")
+result_pl = (df_pl
+    .with_columns(pl.col("date").str.to_date().dt.month().alias("month"))
+    .group_by(["customer_id", "month"])
+    .agg(pl.col("revenue").sum())
+)
+```
+
+Kluczowa różnica: Polars nie modyfikuje DataFrame w miejscu (no inplace). Zawsze tworzysz nowy obiekt. To sprawia, że kod jest bardziej funkcyjny i łatwiejszy do debugowania - ale wymaga zmiany nawyków.
+
+### Wyrażenia (Expressions) - serce Polars
+
+Polars ma elegancki system wyrażeń, który przypomina mi SQL:
+
+```python
+# Wiele transformacji naraz - wydajne, bo wykonuje równolegle
+df.with_columns([
+    pl.col("revenue").log1p().alias("log_revenue"),
+    pl.col("date").str.to_date().dt.year().alias("year"),
+    (pl.col("revenue") / pl.col("revenue").sum()).alias("revenue_share"),
+    pl.col("customer_id").is_duplicated().alias("is_duplicate"),
+])
+```
+
+W pandas każda z tych transformacji to osobna operacja. W Polars - wszystkie naraz, zoptymalizowane przez planner.
+
+### Lazy API - Polars killer feature
+
+```python
+# Zamiast wykonywać od razu - budujesz plan
+result = (
+    pl.scan_csv("huge_file.csv")  # scan = lazy, nie ładuje do RAM
+    .filter(pl.col("date") >= pl.date(2025, 1, 1))
+    .group_by("customer_id")
+    .agg([
+        pl.col("revenue").sum().alias("total_revenue"),
+        pl.col("order_id").count().alias("order_count"),
+    ])
+    .filter(pl.col("total_revenue") > 1000)
+    .sort("total_revenue", descending=True)
+    .collect()  # dopiero tutaj wykonuje się zapytanie
+)
+```
+
+`.collect()` to odpowiednik `.execute()` w SQL. Zanim go wywołasz, Polars optymalizuje plan - np. przesuwa filtry do początku żeby przetworzyć mniej danych.
+
+Z `scan_parquet()` lub `scan_csv()` możesz przetwarzać pliki większe niż dostępna RAM, bo Polars ładuje je w strumieniu.
+
+## Kiedy NIE używać Polars (moje szczere zdanie)
+
+Mimo entuzjazmu, mam przypadki gdzie zostanę przy pandas:
+
+**Ekosystem i biblioteki.** pandas jest de facto standardem. sklearn, statsmodels, matplotlib, seaborn - wszystkie mają natywną integrację z pandas. Z Polars musisz czasem konwertować (`.to_pandas()`) co traci część zysku wydajnościowego.
+
+**Małe dane (< 1 mln wierszy).** Dla małych datasetów różnica jest niezauważalna, a overhead nauki nowego API nie jest warty. Polars świeci na dużych danych.
+
+**Jupyter notebooks i eksploracja.** pandas ma lepsze wyświetlanie w Jupyter i bogatszy ekosystem narzędzi do EDA (pandas-profiling, sweetviz). Dla eksploracyjnej analizy - nadal pandas.
+
+**Starszy codebase.** Jeśli masz 50 000 linii pandas i działają - nie migruj dla migracji. Migruj gdy napotkasz realne problemy z wydajnością.
+
+## Rekomendacja migracji
+
+Jeśli chcesz zacząć z Polars, moja rekomendacja:
+
+1. **Nie przepisuj istniejącego kodu.** Zacznij od nowych projektów lub nowych modułów.
+2. **Zacznij od trybu eager** (bez lazy). API jest prostsze, wyniki szybkie.
+3. **Przeczytaj oficjalny user guide** - szczególnie sekcję "Expressions" i "Contexts". To fundament.
+4. **Ogranicz użycie `.to_pandas()`** do minimum - interfejsu z bibliotekami, które nie wspierają Polars.
+5. **Wprowadź lazy gdy masz pliki > 1 GB lub operacje > 10 sekund.** Tam zysk jest największy.
+
+## Porównanie ekosystemów (stan na 2026)
+
+| Aspekt | pandas | Polars |
+|--------|--------|--------|
+| Dojrzałość | 15+ lat | ~4 lata |
+| Dokumentacja | Świetna | Dobra i rosnąca |
+| Integracja sklearn | Natywna | Wymaga konwersji |
+| Wsparcie Spark | Przez kopiowanie | Natywny polars-spark (eksperymentalny) |
+| DuckDB integracja | Dobra | Doskonała |
+| GPU (RAPIDS) | cuDF | Nie |
+| Trend użycia | Stabilny | Rośnie szybko |
+
+## Jedno zdanie podsumowania
+
+Jeśli budujesz nowy projekt z dużymi danymi w Pythonie - zacznij od Polars. Jeśli masz istniejący kod pandas który działa - nie migruj bez powodu. Jeśli masz problem z wydajnością w pandas - Polars prawdopodobnie go rozwiąże.
+
+---
+
+*Więcej przykładów Polars w produkcji? Opisuję pipeline przetwarzania danych e-commerce (100M wierszy) w Polars w następnym artykule z serii.*

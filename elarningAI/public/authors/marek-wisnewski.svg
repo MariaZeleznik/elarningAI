@@ -1,0 +1,43 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 200" width="200" height="200">
+  <defs>
+    <clipPath id="c2"><circle cx="100" cy="100" r="100"/></clipPath>
+    <linearGradient id="bg2" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1B2E4B"/>
+      <stop offset="100%" stop-color="#0a1a2d"/>
+    </linearGradient>
+  </defs>
+  <circle cx="100" cy="100" r="100" fill="url(#bg2)"/>
+  <!-- Shoulders / suit jacket -->
+  <path d="M5 200 Q32 150 100 145 Q168 150 195 200Z" fill="#0d1f30" clip-path="url(#c2)"/>
+  <!-- Tie -->
+  <path d="M97 125 L100 145 L103 125 L101 118 L99 118Z" fill="#2563eb"/>
+  <!-- Shirt -->
+  <path d="M88 135 Q100 148 112 135 L107 122 L100 130 L93 122Z" fill="#f8f8f8"/>
+  <!-- Neck -->
+  <rect x="91" y="116" width="18" height="22" rx="4" fill="#b5845a"/>
+  <!-- Head shape (slightly wider for male) -->
+  <ellipse cx="100" cy="93" rx="32" ry="35" fill="#b5845a"/>
+  <!-- Short hair -->
+  <path d="M68 83 Q70 54 100 50 Q130 54 132 83 Q130 62 100 60 Q70 62 68 83Z" fill="#2c1810"/>
+  <!-- Side hair -->
+  <path d="M68 83 Q66 95 68 105 L74 105 Q72 95 72 83Z" fill="#2c1810"/>
+  <path d="M132 83 Q134 95 132 105 L126 105 Q128 95 128 83Z" fill="#2c1810"/>
+  <!-- Ears -->
+  <ellipse cx="68" cy="95" rx="5" ry="7" fill="#b5845a"/>
+  <ellipse cx="132" cy="95" rx="5" ry="7" fill="#b5845a"/>
+  <!-- Eyes -->
+  <ellipse cx="88" cy="92" rx="5" ry="3.5" fill="#1a0f08"/>
+  <ellipse cx="112" cy="92" rx="5" ry="3.5" fill="#1a0f08"/>
+  <!-- Eye whites highlight -->
+  <ellipse cx="89.5" cy="91" rx="1.5" ry="1.5" fill="#ffffff" opacity="0.6"/>
+  <ellipse cx="113.5" cy="91" rx="1.5" ry="1.5" fill="#ffffff" opacity="0.6"/>
+  <!-- Eyebrows (thicker for male) -->
+  <path d="M81 84 Q88 81 95 84" stroke="#1a0f08" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <path d="M105 84 Q112 81 119 84" stroke="#1a0f08" stroke-width="3" fill="none" stroke-linecap="round"/>
+  <!-- Nose -->
+  <path d="M97 99 L96 107 Q100 109 104 107 L103 99" stroke="#8B5E3C" stroke-width="1.5" fill="none" stroke-linecap="round"/>
+  <!-- Lips (thinner for male) -->
+  <path d="M90 116 Q100 120 110 116" stroke="#9B6050" stroke-width="2" fill="none" stroke-linecap="round"/>
+  <!-- Stubble hint -->
+  <path d="M85 118 Q90 122 100 123 Q110 122 115 118" stroke="#1a0f08" stroke-width="0.8" fill="none" opacity="0.3"/>
+</svg>

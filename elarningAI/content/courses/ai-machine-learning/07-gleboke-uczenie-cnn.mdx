@@ -1,0 +1,174 @@
+﻿---
+title: CNN - sieci konwolucyjne i rozpoznawanie obrazów
+module: 6
+order: 7
+free: false
+duration: 60
+exercise:
+  prompt: "Stwórz prostą sieć CNN w PyTorch dla obrazów 28x28 (skala szarości). Architektura: Conv2d(1, 32, 3) → ReLU → MaxPool2d(2) → Flatten → Linear(32*13*13, 10). Wydrukuj sumę parametrów modelu."
+  expected: "import torch\nimport torch.nn as nn\nmodel = nn.Sequential(\n    nn.Conv2d(1, 32, 3),\n    nn.ReLU(),\n    nn.MaxPool2d(2),\n    nn.Flatten(),\n    nn.Linear(32*13*13, 10)\n)\ntotal = sum(p.numel() for p in model.parameters())\nprint(f'Parametry: {total}')"
+  hint: "Conv2d(1, 32, 3) oznacza: 1 kanał wejściowy, 32 filtry, kernel 3x3. Po MaxPool2d(2) rozmiar 28→26→13"
+  language: python
+---
+
+Kiedy pierwszy raz zobaczyłam że model może zidentyfikować kota na zdjęciu - byłam w połowie pewna że to jakaś sztuczka. CNN to nie sztuczka, to elegancka matematyka. Ale żeby ją zrozumieć, musisz myśleć o obrazach inaczej niż o zwykłych danych.
+
+## Dlaczego sieci w pełni połączone (MLP) nie radzą sobie z obrazami
+
+Obraz 256×256 RGB to 196 608 liczb. Warstwa ukryta z 1000 neuronami = **196 milionów** parametrów. Tylko w pierwszej warstwie. To:
+- Ogromna pamięć
+- Ogromna liczba operacji  
+- Brak uwzględnienia **lokalności** - piksel (100, 100) ma znaczenie w kontekście sąsiednich pikseli, nie pikseli na końcu obrazu
+
+CNN rozwiązuje oba problemy.
+
+## Operacja konwolucji - core CNN
+
+Filtr (kernel) to mała macierz wag (np. 3×3). Przesuwa się po obrazie i oblicza "odpowiedź" w każdej pozycji:
+
+```
+Obraz (wycinek 3×3):          Filtr (kernel):       Wynik (1 piksel):
+[ 1  0  1 ]               [ 0  1  0 ]
+[ 0  1  0 ]      *         [ 1  0  1 ]    =   1*0 + 0*1 + 1*0 + ... = 3
+[ 1  0  1 ]               [ 0  1  0 ]
+```
+
+Wyniki dla wszystkich pozycji tworzą **mapę cech** (feature map). Jeden filtr wykrywa jedną "cechę" - krawędź poziomą, krawędź pionową, narożnik itp.
+
+Kluczowe: **wagi filtra są takie same niezależnie od pozycji w obrazie**. To radykalnie redukuje liczbę parametrów.
+
+```python
+import torch
+import torch.nn as nn
+
+# Warstwa konwolucji: 1 kanał wejście, 32 filtry, kernel 3x3
+conv = nn.Conv2d(in_channels=1, out_channels=32, kernel_size=3, padding=1)
+
+# Liczba parametrów: 32 filtry × (3×3×1 wag + 1 bias) = 32×10 = 320
+total_params = sum(p.numel() for p in conv.parameters())
+print(f"Parametry Conv2d: {total_params}")  # 320
+
+# Dla porównania: Linear(784, 32) = 784×32 + 32 = 25 120 parametrów
+linear = nn.Linear(784, 32)
+total_linear = sum(p.numel() for p in linear.parameters())
+print(f"Parametry Linear: {total_linear}")  # 25 120
+```
+
+## Kompletna CNN: klasyfikacja MNIST
+
+MNIST to 70 000 zdjęć cyfr 0-9 (28×28 pikseli, skala szarości). Klasyczny benchmark.
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torchvision import datasets, transforms
+from torch.utils.data import DataLoader
+
+# Transform: zamień obraz PIL → tensor, znormalizuj
+transform = transforms.Compose([
+    transforms.ToTensor(),
+    transforms.Normalize((0.1307,), (0.3081,))  # mean, std dla MNIST
+])
+
+train_data = datasets.MNIST(root='./data', train=True, download=True, transform=transform)
+test_data = datasets.MNIST(root='./data', train=False, download=True, transform=transform)
+
+train_loader = DataLoader(train_data, batch_size=64, shuffle=True)
+test_loader = DataLoader(test_data, batch_size=1000)
+
+class SimpleCNN(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.conv_block1 = nn.Sequential(
+            nn.Conv2d(1, 32, kernel_size=3, padding=1),  # 28×28 → 28×28
+            nn.BatchNorm2d(32),
+            nn.ReLU(),
+            nn.MaxPool2d(2),                              # 28×28 → 14×14
+        )
+        self.conv_block2 = nn.Sequential(
+            nn.Conv2d(32, 64, kernel_size=3, padding=1), # 14×14 → 14×14
+            nn.BatchNorm2d(64),
+            nn.ReLU(),
+            nn.MaxPool2d(2),                              # 14×14 → 7×7
+        )
+        self.classifier = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 128),
+            nn.ReLU(),
+            nn.Dropout(0.5),
+            nn.Linear(128, 10),
+        )
+    
+    def forward(self, x):
+        x = self.conv_block1(x)
+        x = self.conv_block2(x)
+        return self.classifier(x)
+
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+model = SimpleCNN().to(device)
+optimizer = optim.Adam(model.parameters(), lr=0.001)
+criterion = nn.CrossEntropyLoss()
+
+print(f"Parametry modelu: {sum(p.numel() for p in model.parameters()):,}")
+
+# Trening - 5 epok
+for epoch in range(5):
+    model.train()
+    for batch_X, batch_y in train_loader:
+        batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+        optimizer.zero_grad()
+        loss = criterion(model(batch_X), batch_y)
+        loss.backward()
+        optimizer.step()
+    
+    # Ewaluacja
+    model.eval()
+    correct = total = 0
+    with torch.no_grad():
+        for batch_X, batch_y in test_loader:
+            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+            pred = model(batch_X).argmax(dim=1)
+            correct += (pred == batch_y).sum().item()
+            total += len(batch_y)
+    print(f"Epoch {epoch+1}: accuracy = {correct/total:.2%}")
+# Oczekiwane wyniki: po 5 epokach ~99% accuracy
+```
+
+## Transfer Learning - nie trenuj od zera
+
+ResNet, VGG, EfficientNet - wytrenowane na ImageNet (1.2M obrazów, 1000 klas). Możesz "przekształcić" je do swojego zadania:
+
+```python
+from torchvision import models
+import torch.nn as nn
+
+# Pobierz wytrenowany ResNet18
+model = models.resnet18(pretrained=True)
+
+# Zamroź wszystkie warstwy (nie ucz ich)
+for param in model.parameters():
+    param.requires_grad = False
+
+# Zamień tylko ostatnią warstwę (dla 5 klas zamiast 1000)
+model.fc = nn.Linear(model.fc.in_features, 5)  # tylko ta warstwa będzie uczona
+
+# Teraz trenujesz tylko 5120+5 = ~5100 parametrów zamiast 11 milionów
+trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Trenowalne parametry: {trainable:,}")
+```
+
+Transfer learning to standard produkcyjny. Nawet przy 500 zdjęciach możesz osiągnąć 90%+ accuracy korzystając z wiedzy wbudowanej w wytrenowany ResNet.
+
+## MaxPooling - redukcja rozmiaru
+
+```python
+# MaxPool2d: bierze maksimum z obszaru 2×2 → zmniejsza przestrzennie o połowę
+pool = nn.MaxPool2d(kernel_size=2, stride=2)
+x = torch.randn(1, 32, 14, 14)
+print(pool(x).shape)  # torch.Size([1, 32, 7, 7])
+```
+
+Pooling to hierarchia abstrakcji: pierwsze warstwy wykrywają krawędzie, środkowe - kształty, ostatnie - całe obiekty (oczy, nosy, koła samochodu).
+
+W następnej lekcji: sieci rekurencyjne - RNN i LSTM do analizy sekwencji i tekstu.

@@ -1,0 +1,173 @@
+﻿---
+title: Drzewa decyzyjne i Ensemble Learning - Random Forest, XGBoost
+module: 4
+order: 5
+free: false
+duration: 60
+exercise:
+  prompt: "Wytrenuj RandomForestClassifier na datasecie Iris z n_estimators=50 i random_state=42. Wydrukuj accuracy na zbiorze testowym (test_size=0.25)."
+  expected: "from sklearn.datasets import load_iris\nfrom sklearn.model_selection import train_test_split\nfrom sklearn.ensemble import RandomForestClassifier\nfrom sklearn.metrics import accuracy_score\nX, y = load_iris(return_X_y=True)\nX_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.25, random_state=42)\nmodel = RandomForestClassifier(n_estimators=50, random_state=42)\nmodel.fit(X_train, y_train)\nprint(accuracy_score(y_test, model.predict(X_test)))"
+  hint: "Załaduj iris z load_iris(return_X_y=True), podziel dane, stwórz RandomForestClassifier i wytrenuj go"
+  language: python
+---
+
+Drzewa decyzyjne są jak pytania w grze "Zgadnij kto?" Jedyne pytania, na które odpowiedź to "tak" albo "nie", a każda odpowiedź przybliża cię do właściwej klasy. To jeden z najbardziej intuicyjnych algorytmów ML.
+
+## Drzewo decyzyjne - jak ono "myśli"
+
+```
+                    Czy powierzchnia > 80m²?
+                    /                       \
+                  Tak                       Nie
+                  /                           \
+    Czy rok_budowy > 2010?              Czy piętro > 5?
+         /         \                    /           \
+        Tak         Nie               Tak            Nie
+       /               \            /                  \
+   DROGI           ŚREDNI      DROGI               TANI
+(> 450 tys.)    (300-450 tys.) (> 350 tys.)     (< 250 tys.)
+```
+
+Model buduje to drzewo automatycznie, wybierając w każdym węźle podział który **maksymalnie redukuje "nieczystość"** zbioru (Gini impurity lub Entropy).
+
+```python
+from sklearn.datasets import load_iris
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.model_selection import train_test_split
+
+X, y = load_iris(return_X_y=True)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# max_depth=3 ogranicza głębokość - zapobiega overfittingowi
+dt = DecisionTreeClassifier(max_depth=3, random_state=42)
+dt.fit(X_train, y_train)
+
+# Wydruk struktury drzewa (czytelny tekst)
+feature_names = ['dług. działki', 'szer. działki', 'dług. płatka', 'szer. płatka']
+print(export_text(dt, feature_names=feature_names))
+```
+
+**Problem z pojedynczym drzewem:** bez ograniczenia `max_depth` wyrośnie do perfekcji na danych treningowych (100% accuracy treningowe), ale będzie katastrofalnie overfittować na nowych danych. Głębokie drzewo "zapamiętuje" szum w danych.
+
+## Ensemble Learning - siła zbiorowej mądrości
+
+Zamiast jednego modelu: **wiele modeli + głosowanie = lepszy wynik**.
+
+Trzy podejścia:
+
+### 1. Bagging - Random Forest
+
+Każde z N drzew trenuje się na **losowym podzbiorze danych** (bootstrap sampling). Finalna predykcja = głosowanie większościowe.
+
+```python
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+import numpy as np
+
+rf = RandomForestClassifier(
+    n_estimators=100,      # 100 drzew
+    max_depth=None,        # nieograniczone drzewa (bagging zapobiega overfittingowi)
+    max_features='sqrt',   # każde drzewo widzi sqrt(n_cech) cech - randomizacja
+    n_jobs=-1,             # użyj wszystkich CPU
+    random_state=42,
+)
+rf.fit(X_train, y_train)
+print(f"Random Forest accuracy: {accuracy_score(y_test, rf.predict(X_test)):.2%}")
+
+# Ważność cech
+importances = rf.feature_importances_
+for name, imp in sorted(zip(feature_names, importances), key=lambda x: -x[1]):
+    print(f"  {name}: {imp:.3f}")
+```
+
+Random Forest jest potęgą bo:
+- Drzewa trenowane na różnych podzbiorach danych → mniej korelacji między błędami
+- Drzewa widzą różne podzbiory cech → większa różnorodność
+- Błędy indywidualnych drzew "uśredniają się" przy głosowaniu
+
+### 2. Boosting - XGBoost
+
+Drzewa trenują się **sekwencyjnie**. Każde kolejne drzewo koncentruje się na błędach poprzedniego. To sprawia, że XGBoost jest często najlepszym modelem dla danych tabelarycznych.
+
+```python
+from xgboost import XGBClassifier
+from sklearn.metrics import accuracy_score
+
+xgb = XGBClassifier(
+    n_estimators=200,
+    learning_rate=0.1,
+    max_depth=4,
+    subsample=0.8,         # każde drzewo widzi 80% danych (jak bagging)
+    colsample_bytree=0.8,  # każde drzewo widzi 80% cech
+    random_state=42,
+    eval_metric='logloss',
+    verbosity=0,
+)
+xgb.fit(X_train, y_train,
+        eval_set=[(X_test, y_test)],
+        verbose=False)
+
+print(f"XGBoost accuracy: {accuracy_score(y_test, xgb.predict(X_test)):.2%}")
+```
+
+### 3. Stacking - metamodel
+
+Kilka różnych modeli (np. RF + XGBoost + logistic regression) trenuje predykcje, a metamodel uczy się jak je łączyć.
+
+```python
+from sklearn.ensemble import StackingClassifier
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+
+estimators = [
+    ('rf', RandomForestClassifier(n_estimators=50, random_state=42)),
+    ('gb', GradientBoostingClassifier(n_estimators=50, random_state=42)),
+]
+stacking = StackingClassifier(
+    estimators=estimators,
+    final_estimator=LogisticRegression(),
+    cv=5,
+)
+stacking.fit(X_train, y_train)
+print(f"Stacking accuracy: {accuracy_score(y_test, stacking.predict(X_test)):.2%}")
+```
+
+## Hyperparameter tuning - jak szukać najlepszych ustawień
+
+Modele mają parametry które MY ustawiamy (nie model sam je uczy). Ich dobór to osobna sztuka.
+
+```python
+from sklearn.model_selection import RandomizedSearchCV
+
+param_dist = {
+    'n_estimators': [50, 100, 200, 300],
+    'max_depth': [None, 5, 10, 20],
+    'min_samples_split': [2, 5, 10],
+    'min_samples_leaf': [1, 2, 4],
+}
+
+search = RandomizedSearchCV(
+    RandomForestClassifier(random_state=42),
+    param_distributions=param_dist,
+    n_iter=20,           # losowo sprawdzamy 20 kombinacji
+    cv=5,                # 5-fold cross-validation
+    scoring='accuracy',
+    n_jobs=-1,
+    random_state=42,
+)
+search.fit(X_train, y_train)
+print(f"Najlepsze parametry: {search.best_params_}")
+print(f"CV accuracy: {search.best_score_:.2%}")
+```
+
+## Kiedy Random Forest, kiedy XGBoost?
+
+| Sytuacja | Random Forest | XGBoost |
+|----------|--------------|---------|
+| Szybki baseline | ✅ Mniej parametrów | ❌ Więcej do ustawiania |
+| Najlepsza accuracy | ❌ Zwykle gorszy | ✅ Wygrywa większość konkursów |
+| Stabilność | ✅ Mało wrażliwy na parametry | ❌ Learning rate wymaga uwagi |
+| Interpretacja | ✅ Feature importance | ✅ Feature importance |
+| Duży dataset | ✅ Działa | ✅ Działa (szybciej) |
+
+**Moja reguła kciuka:** zacznij od Random Forest żeby mieć baseline. Potem XGBoost z podstawowymi parametrami - często od razu wygra. Hyperparameter tuning dopiero na końcu.

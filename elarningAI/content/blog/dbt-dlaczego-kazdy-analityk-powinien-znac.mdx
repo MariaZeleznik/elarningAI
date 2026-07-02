@@ -1,0 +1,217 @@
+﻿W 2021 roku jeden z moich klientów - firma e-commerce z ~50M PLN przychodu - miał 23 różne definicje "aktywnego klienta". Każdy raport liczył inaczej. Marketing liczył tych, którzy otworzyli email w ostatnich 90 dniach. Sprzedaż - tych, którzy kupili w ostatnim roku. Finanse - tych, którzy mają historię zakupów bez zwrotów. Customer Success - coś jeszcze innego.
+
+Wyobraź sobie spotkanie zarządu, gdzie każdy dział prezentuje "aktywnych klientów" i każdy ma inną liczbę. Tak wyglądał mój projekt wprowadzenia dbt.
+
+## Czym jest dbt i dlaczego to nie jest "po prostu kolejne narzędzie"
+
+dbt (data build tool) to framework do transformacji danych w SQL. Ale to zdanie kompletnie nie oddaje tego, co dbt zmienia.
+
+Przed dbt przepływ danych w typowej firmie wyglądał tak:
+
+```
+Baza danych produkcyjna
+       ↓
+ETL (skrypty Python / przepływ Airflow)
+       ↓
+Tabele w hurtowni (ręcznie tworzone i zarządzane)
+       ↓
+Dashboardy BI (z własną logiką w Looker/Power BI)
+```
+
+Logika biznesowa rozrzucona po ETL, SQL widokach i narzędziach BI — i nikt nie wie co gdzie. Zero wersjonowania, więc nie wiesz co zmieniło się i kiedy. Zero testów — błąd w danych odkrywasz na spotkaniu zarządu, nie wcześniej. I zero dokumentacji. Na poważnie, widziałam kolumnę o nazwie `customer_status_v2_final_REALLY_FINAL`. Nikt nie wiedział co to znaczy. Osoba która to stworzyła odeszła z firmy rok wcześniej.
+
+Z dbt:
+
+```
+Baza danych produkcyjna / źródła
+       ↓
+[dbt] Staging models (surowe dane, minimalna transformacja)
+       ↓
+[dbt] Intermediate models (logika biznesowa)
+       ↓
+[dbt] Mart models (gotowe tabele dla BI)
+       ↓
+Dashboardy BI (używają dbt marts - bez własnej logiki!)
+```
+
+I co najważniejsze: każdy model dbt to plik SQL w git. Z historią. Z testami. Z dokumentacją.
+
+## Architektura projektu dbt w praktyce
+
+Standardowy projekt, który polecam klientom:
+
+```
+dbt_project/
+├── models/
+│   ├── staging/           # Jeden model per źródło
+│   │   ├── stg_orders.sql
+│   │   ├── stg_customers.sql
+│   │   └── stg_products.sql
+│   ├── intermediate/      # Transformacje pomocnicze
+│   │   ├── int_customer_orders.sql
+│   │   └── int_product_metrics.sql
+│   └── marts/             # Finalne tabele dla BI
+│       ├── customers/
+│       │   ├── dim_customers.sql
+│       │   └── fct_customer_activity.sql
+│       └── finance/
+│           ├── fct_revenue.sql
+│           └── dim_payment_methods.sql
+├── tests/
+├── macros/
+└── dbt_project.yml
+```
+
+### Model staging
+
+Staging to "tłumaczenie" surowych danych do jednolitego formatu. Minimalna logika - przede wszystkim:
+- Przemianowanie kolumn na konsekwentne nazwy
+- Rzutowanie typów (string → date, etc.)
+- Usunięcie oczywistych duplikatów
+
+```sql
+-- models/staging/stg_orders.sql
+WITH source AS (
+    SELECT * FROM {{ source('raw', 'orders') }}
+),
+renamed AS (
+    SELECT
+        order_id,
+        customer_id,
+        CAST(created_at AS TIMESTAMP) AS created_at,
+        CAST(total_amount_cents AS DECIMAL) / 100 AS total_amount_pln,
+        LOWER(status) AS order_status,
+        COALESCE(shipping_method, 'standard') AS shipping_method
+    FROM source
+    WHERE _deleted_at IS NULL  -- usuń "miękko" usunięte rekordy
+)
+SELECT * FROM renamed
+```
+
+### Model mart z metrykami biznesowymi
+
+```sql
+-- models/marts/customers/dim_customers.sql
+WITH customers AS (
+    SELECT * FROM {{ ref('stg_customers') }}
+),
+orders AS (
+    SELECT * FROM {{ ref('stg_orders') }}
+),
+customer_metrics AS (
+    SELECT
+        customer_id,
+        COUNT(*) AS total_orders,
+        SUM(total_amount_pln) AS lifetime_value_pln,
+        MIN(created_at) AS first_order_date,
+        MAX(created_at) AS last_order_date,
+        -- AKTYWNY KLIENT: kupił w ostatnich 365 dniach
+        MAX(created_at) >= CURRENT_DATE - INTERVAL '365 days' AS is_active
+    FROM orders
+    WHERE order_status = 'completed'
+    GROUP BY customer_id
+)
+SELECT
+    c.customer_id,
+    c.email,
+    c.first_name,
+    c.last_name,
+    c.country,
+    COALESCE(m.total_orders, 0) AS total_orders,
+    COALESCE(m.lifetime_value_pln, 0) AS lifetime_value_pln,
+    m.first_order_date,
+    m.last_order_date,
+    COALESCE(m.is_active, FALSE) AS is_active
+FROM customers c
+LEFT JOIN customer_metrics m USING (customer_id)
+```
+
+Teraz definicja "aktywnego klienta" jest w jednym miejscu - w `dim_customers.sql`. Zmienisz definicję → wszystkie raporty automatycznie korzystają z nowej definicji. Koniec z 23 różnymi liczbami.
+
+## Testy danych - funkcjonalność, która zmienia grę
+
+dbt ma wbudowany system testów. Dodajesz do pliku YAML:
+
+```yaml
+# models/marts/customers/dim_customers.yml
+models:
+  - name: dim_customers
+    columns:
+      - name: customer_id
+        tests:
+          - unique           # każdy ID musi być unikatowy
+          - not_null         # żaden nie może być NULL
+      - name: is_active
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]
+      - name: lifetime_value_pln
+        tests:
+          - not_null
+          - dbt_utils.expression_is_true:
+              expression: ">= 0"  # wartość klienta nie może być ujemna
+```
+
+Uruchamiasz `dbt test` - i jeśli jakieś wiersze mają duplikaty w `customer_id`, NULL w `is_active`, albo ujemne `lifetime_value_pln` - test fail. Możesz to puścić w CI/CD i blokować deploy danych jeśli testy nie przejdą.
+
+W projekcie e-commerce wykryłem tym sposobem błąd w ETL, który przez 6 miesięcy dublował część zamówień z kanału marketplace. Bez testów: błąd żył dalej w spokoju. Z testami: alert przy następnym uruchomieniu.
+
+## Freshness tests - czy dane są aktualne?
+
+```yaml
+sources:
+  - name: raw
+    tables:
+      - name: orders
+        freshness:
+          warn_after: {count: 6, period: hour}   # ostrzeżenie po 6h braku nowych danych
+          error_after: {count: 24, period: hour}  # błąd po 24h
+        loaded_at_field: _created_at
+```
+
+dbt sprawdzi, czy najnowszy rekord w tabeli `orders` ma `_created_at` z ostatnich 6 godzin. Jeśli nie - dostaniesz alert. Używam tego w 100% projektów.
+
+## Dokumentacja, której nikt nie zignoruje
+
+```yaml
+models:
+  - name: dim_customers
+    description: >
+      Tabela wymiarów klientów. Jeden wiersz = jeden klient.
+      Źródło: stg_customers + metryki z stg_orders.
+      Definicja "aktywny klient": kupił przynajmniej raz 
+      w ciągu ostatnich 365 dni (order_status = 'completed').
+    columns:
+      - name: is_active
+        description: >
+          TRUE jeśli klient złożył co najmniej jedno zamówienie
+          ze statusem 'completed' w ciągu ostatnich 365 dni.
+          Aktualizowane przy każdym uruchomieniu dbt.
+```
+
+`dbt docs generate && dbt docs serve` - masz automatycznie wygenerowany portal dokumentacji z lineage graph (skąd płyną dane), opisami kolumn i testami. Każdy, kto kiedykolwiek szukał co oznacza `customer_status_v2_final_REALLY_FINAL` - doceni to natychmiast.
+
+## Kiedy NIE używać dbt
+
+dbt nie rozwiązuje wszystkiego i warto to powiedzieć wprost.
+
+Jeśli Twoje transformacje wymagają Pythona — ML, NLP, złożonej logiki niemożliwej w SQL — Python pipeline (Airflow + pandas) jest właściwym narzędziem. dbt ma eksperymentalne Python models, ale unikam ich w produkcji. SQL modele są prostsze do testowania i łatwiejsze dla innych do zrozumienia.
+
+dbt działa najlepiej z analitycznymi bazami: BigQuery, Snowflake, Databricks, Redshift. Z MySQL lub SQLite to nieoptymalna kombinacja — możesz, ale jest mniej sensu.
+
+I jeśli masz 2 tabele i prosty raport — dbt to overengineering. Nie każdy problem wymaga frameworka.
+
+## ROI z projektu dbt
+
+Dla klienta e-commerce, o którym pisałem: po 3 miesiącach projektu:
+- 23 definicje "aktywnego klienta" → 1 definicja
+- Czas generowania raportów: z 4h tygodniowo → 45 minut (automatyczne)
+- Liczba "błędów danych" wykrytych tygodniowo: z ~0 (niewidoczne) → 2–3 (wykryte i naprawione przed biznesem)
+- Czas onboardingu nowego analityka: z "2 tygodni pytania wszędzie" → "3 dni, bo mamy dokumentację"
+
+To nie jest magia. To inżynieria.
+
+---
+
+*Chcesz zacząć z dbt? Polecam dbt Learn (darmowe) i projekt z dbt Core (open-source). Zacznij od dbt Cloud na trial - setup jest dramatycznie prostszy niż lokalnie.*

@@ -1,0 +1,173 @@
+﻿---
+title: Regresja liniowa i logistyczna - pierwszy działający model
+module: 3
+order: 4
+free: false
+duration: 55
+exercise:
+  prompt: "Stwórz model regresji liniowej, który przewiduje cenę domu na podstawie jednej cechy (powierzchnia). X = [[50],[80],[100],[120],[150]], y = [200000,300000,350000,420000,500000]. Dopasuj model i wydrukuj współczynnik nachylenia (coef_)."
+  expected: "from sklearn.linear_model import LinearRegression\nimport numpy as np\nX = np.array([[50],[80],[100],[120],[150]])\ny = np.array([200000,300000,350000,420000,500000])\nmodel = LinearRegression()\nmodel.fit(X, y)\nprint(model.coef_)"
+  hint: "Użyj LinearRegression z sklearn.linear_model, dopasuj model funkcją fit(X, y), następnie sprawdź atrybut coef_"
+  language: python
+---
+
+Pierwszy model który napisałam samodzielnie to była regresja liniowa. Zajęło mi 20 minut żeby zrozumieć co robię - i kolejne dwa dni żeby zrozumieć dlaczego to w ogóle działa. Zaoszczędzę ci tych dwóch dni.
+
+## Regresja liniowa - intuicja przed matematyką
+
+Masz dane: mieszkania i ich ceny. Chcesz znaleźć linię prostą, która najlepiej "pasuje" do tych punktów - żeby móc przewidzieć cenę nowego mieszkania.
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+
+# Przykładowe dane: metraż → cena (tys. PLN)
+powierzchnia = np.array([30, 45, 50, 60, 70, 80, 90, 100, 120, 150])
+cena = np.array([180, 250, 280, 320, 360, 410, 440, 490, 560, 680])
+
+plt.scatter(powierzchnia, cena, color='blue', alpha=0.7)
+plt.xlabel('Powierzchnia (m²)')
+plt.ylabel('Cena (tys. PLN)')
+plt.title('Ceny mieszkań - zależność od metrażu')
+plt.show()
+```
+
+Model regresji liniowej szuka równania: `cena = w * powierzchnia + b`
+
+Gdzie `w` to nachylenie (waga/współczynnik) i `b` to punkt przecięcia z osią Y (bias). Suma tych parametrów to linia prosta.
+
+## Jak "najlepsza linia" jest znajdowana?
+
+Minimalizujemy **Mean Squared Error (MSE)** - średnią kwadratów błędów predykcji:
+
+```
+MSE = (1/n) * Σ (y_i - ŷ_i)²
+```
+
+gdzie `y_i` to prawdziwa cena, `ŷ_i` to cena przewidziana przez model.
+
+W scikit-learn robisz to jedną linią. Biblioteka sama rozwiązuje optymalizację analitycznie (metodą "normal equations" - nie gradient descent):
+
+```python
+from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, r2_score
+
+X = powierzchnia.reshape(-1, 1)  # scikit-learn wymaga 2D: (n_próbek, n_cech)
+X_train, X_test, y_train, y_test = train_test_split(X, cena, test_size=0.3, random_state=42)
+
+model = LinearRegression()
+model.fit(X_train, y_train)
+
+print(f"Nachylenie (waga): {model.coef_[0]:.2f}")     # ~ 4.3
+print(f"Punkt przecięcia: {model.intercept_:.2f}")     # ~ 53
+# Interpretacja: każdy m² dokłada ~4300 PLN do ceny
+
+y_pred = model.predict(X_test)
+mse = mean_squared_error(y_test, y_pred)
+r2 = r2_score(y_test, y_pred)
+print(f"MSE: {mse:.0f}")
+print(f"R² score: {r2:.3f}")  # 1.0 = idealnie, 0 = model nie lepszy od średniej
+```
+
+**R² (coefficient of determination)** to kluczowa metryka dla regresji. R²=0.95 znaczy że model wyjaśnia 95% wariancji w danych.
+
+## Regresja wielowymiarowa - wiele cech naraz
+
+W praktyce masz dziesiątki cech, nie jedną. Regresja liniowa skaluje się bez zmian w API:
+
+```python
+from sklearn.datasets import load_boston  # uwaga: deprecated w nowszym sklearn
+# Zamiast tego użyj własnych danych:
+
+import pandas as pd
+from sklearn.linear_model import LinearRegression
+from sklearn.preprocessing import StandardScaler
+from sklearn.pipeline import Pipeline
+
+# Symulowane dane mieszkań
+dane = pd.DataFrame({
+    'powierzchnia': [50, 80, 100, 120, 60, 90, 75, 110],
+    'piętro':       [2, 5, 3, 8, 1, 4, 6, 2],
+    'rok_budowy':   [1990, 2005, 2010, 2020, 1985, 2015, 2000, 2018],
+    'liczba_pokoi': [2, 3, 4, 5, 2, 3, 3, 4],
+    'cena':         [250, 380, 450, 580, 200, 410, 330, 510],
+})
+
+X = dane[['powierzchnia', 'piętro', 'rok_budowy', 'liczba_pokoi']]
+y = dane['cena']
+
+# Pipeline: skalowanie + model (ważne przy wielu cechach na różnych skalach)
+pipeline = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model', LinearRegression()),
+])
+pipeline.fit(X, y)
+
+# Predykcja nowego mieszkania
+nowe = pd.DataFrame({'powierzchnia': [85], 'piętro': [3], 'rok_budowy': [2012], 'liczba_pokoi': [3]})
+print(f"Przewidziana cena: {pipeline.predict(nowe)[0]:.0f} tys. PLN")
+```
+
+**Dlaczego StandardScaler?** Bez skalowania cecha "rok_budowy" (2010) zdominuje "piętro" (3–10) numerycznie. Model liczyłby wagi na bardzo różnych skalach, co utrudnia optymalizację.
+
+## Regresja logistyczna - klasyfikacja, nie regresja
+
+Mylące na początku: "regresja logistyczna" służy do **klasyfikacji**, nie do predykcji liczb. Nazwa historyczna.
+
+Zamiast linii, szuka **granicy decyzyjnej** oddzielającej dwie klasy, korzystając z funkcji sigmoid:
+
+```
+σ(z) = 1 / (1 + e^(-z))
+```
+
+Wynik to prawdopodobieństwo przynależności do klasy 1 (0–1).
+
+```python
+from sklearn.linear_model import LogisticRegression
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import train_test_split
+from sklearn.metrics import classification_report, confusion_matrix
+
+# Dataset: rak piersi (30 cech z obrazów, 2 klasy: złośliwy/łagodny)
+X, y = load_breast_cancer(return_X_y=True)
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+clf = Pipeline([
+    ('scaler', StandardScaler()),
+    ('model', LogisticRegression(max_iter=1000, random_state=42)),
+])
+clf.fit(X_train, y_train)
+
+y_pred = clf.predict(X_test)
+print(classification_report(y_test, y_pred, target_names=['złośliwy', 'łagodny']))
+print("\nMacierz pomyłek:")
+print(confusion_matrix(y_test, y_pred))
+```
+
+**Macierz pomyłek** to kluczowe narzędzie w klasyfikacji:
+
+```
+                  Przewidziano złośliwy  Przewidziano łagodny
+Prawdziwie złośliwy      TP (prawdziwe pozytywy)   FN (fałszywe negatywy)
+Prawdziwie łagodny       FP (fałszywe pozytywy)    TN (prawdziwe negatywy)
+```
+
+Przy diagnozie raka: **FN jest groźny** (przegapiamy raka). Minimalizacja FN = wysoki Recall.
+
+## Kiedy regresja liniowa/logistyczna wystarczy?
+
+Regresja liniowa sprawdzi się gdy:
+- Zależność między cechami a wynikiem jest w przybliżeniu liniowa
+- Masz mało danych (regresja liniowa jest odporna na overfitting)
+- Potrzebujesz interpretowalności - widzisz dokładnie jakie cechy i jak bardzo wpływają
+
+**Jej ograniczenia:**
+- Nie łapie relacji nieliniowych (XOR, interakcji)
+- Zakłada brak silnych korelacji między cechami (multicoliniarity)
+- Wrażliwa na outliery - jeden ekstrem przesuwa całą linię
+
+W następnej lekcji: drzewa decyzyjne i ensemble learning - algorytmy które te ograniczenia przełamują.

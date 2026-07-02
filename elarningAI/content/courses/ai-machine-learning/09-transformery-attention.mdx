@@ -1,0 +1,192 @@
+﻿---
+title: Transformery i mechanizm Attention - fundament LLM
+module: 8
+order: 9
+free: false
+duration: 70
+exercise:
+  prompt: "Używając biblioteki transformers z Hugging Face, wczytaj model 'distilbert-base-uncased' i jego tokenizer. Zaenkoduj zdanie 'Machine learning is fascinating' i wydrukuj input_ids."
+  expected: "from transformers import AutoTokenizer\ntokenizer = AutoTokenizer.from_pretrained('distilbert-base-uncased')\nencoding = tokenizer('Machine learning is fascinating', return_tensors='pt')\nprint(encoding['input_ids'])"
+  hint: "Użyj AutoTokenizer.from_pretrained(), następnie wywołaj tokenizer ze zdaniem i return_tensors='pt'"
+  language: python
+---
+
+W 2017 roku Google opublikował paper "Attention Is All You Need". Szczery tytuł - bo transformer dosłownie zastąpił CNN i RNN w większości zadań NLP. Wszystkie modele językowe których używasz dziś (GPT, Claude, Gemini, Llama) to transformery.
+
+## Mechanizm Attention - serce transformera
+
+Attention odpowiada na pytanie: "Które słowa w zdaniu są najważniejsze dla zrozumienia tego konkretnego słowa?"
+
+Przykład: "Kot siedział na macie, bo **ona** była miękka."
+
+Co to "ona"? Mata czy kot? Attention mechanism oblicza wagi uwagi dla każdego słowa względem "ona" - i uczy się, że "mata" ma wyższy score (ona = mata, nie kot).
+
+```python
+import torch
+import torch.nn.functional as F
+import math
+
+def scaled_dot_product_attention(Q, K, V):
+    """
+    Q: query (co szukamy)
+    K: key (z czym porównujemy)
+    V: value (co zwracamy)
+    """
+    d_k = Q.size(-1)
+    scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(d_k)
+    weights = F.softmax(scores, dim=-1)  # suma = 1 dla każdego tokenu
+    return torch.matmul(weights, V), weights
+
+# Przykład: 4 tokeny, d_k=64
+Q = torch.randn(1, 4, 64)  # (batch, seq, d_k)
+K = torch.randn(1, 4, 64)
+V = torch.randn(1, 4, 64)
+
+output, weights = scaled_dot_product_attention(Q, K, V)
+print(f"Output: {output.shape}")   # (1, 4, 64)
+print(f"Attention weights:\n{weights[0].detach().round(decimals=2)}")
+# Każdy wiersz sumuje się do 1.0
+```
+
+## Multi-Head Attention
+
+Zamiast jednego mechanizmu attention, transformer używa H głów (heads) równolegle - każda uczy się zwracać uwagę na inne aspekty tekstu.
+
+```python
+import torch
+import torch.nn as nn
+
+class MultiHeadAttention(nn.Module):
+    def __init__(self, d_model=512, num_heads=8):
+        super().__init__()
+        assert d_model % num_heads == 0
+        self.d_k = d_model // num_heads
+        self.num_heads = num_heads
+        
+        self.W_q = nn.Linear(d_model, d_model)
+        self.W_k = nn.Linear(d_model, d_model)
+        self.W_v = nn.Linear(d_model, d_model)
+        self.W_o = nn.Linear(d_model, d_model)
+    
+    def split_heads(self, x, batch_size):
+        x = x.view(batch_size, -1, self.num_heads, self.d_k)
+        return x.transpose(1, 2)  # (batch, heads, seq, d_k)
+    
+    def forward(self, x):
+        batch_size = x.size(0)
+        Q = self.split_heads(self.W_q(x), batch_size)
+        K = self.split_heads(self.W_k(x), batch_size)
+        V = self.split_heads(self.W_v(x), batch_size)
+        
+        scores = torch.matmul(Q, K.transpose(-2, -1)) / math.sqrt(self.d_k)
+        weights = torch.softmax(scores, dim=-1)
+        attended = torch.matmul(weights, V)
+        
+        # Połącz wszystkie głowy
+        attended = attended.transpose(1, 2).contiguous()
+        attended = attended.view(batch_size, -1, self.num_heads * self.d_k)
+        return self.W_o(attended)
+
+mha = MultiHeadAttention(d_model=512, num_heads=8)
+x = torch.randn(2, 10, 512)  # batch=2, seq=10, d_model=512
+print(mha(x).shape)  # (2, 10, 512)
+```
+
+## Architektura Transformer - encoder i decoder
+
+```
+ENCODER:                                 DECODER:
+Input tokens                            Output tokens (shifted right)
+     ↓                                          ↓
+Embeddings + Positional Encoding        Embeddings + Positional Encoding
+     ↓                                          ↓
+[Multi-Head Self-Attention]             [Masked Multi-Head Self-Attention]
+     ↓                                          ↓
+[Add & LayerNorm]                       [Multi-Head Cross-Attention ← encoder output]
+     ↓                                          ↓
+[Feed Forward Network]                  [Feed Forward Network]
+     ↓                                          ↓
+[Add & LayerNorm]                       Linear + Softmax
+     ↓                                          ↓
+  (×N layers)                              Next token probabilities
+```
+
+GPT (i większość LLM) używa tylko **decoder** (autoregressive) - generuje tokeny jeden po drugim.
+BERT używa tylko **encoder** - rozumie cały kontekst do embeddingów.
+
+## Pozycyjne kodowanie (Positional Encoding)
+
+Transformer przetwarza wszystkie tokeny równolegle - nie ma inherentnego pojęcia kolejności. Dlatego dodajemy kodowanie pozycji:
+
+```python
+import torch
+import math
+
+def positional_encoding(max_len, d_model):
+    pe = torch.zeros(max_len, d_model)
+    position = torch.arange(0, max_len).float().unsqueeze(1)
+    div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+    
+    pe[:, 0::2] = torch.sin(position * div_term)
+    pe[:, 1::2] = torch.cos(position * div_term)
+    return pe.unsqueeze(0)  # (1, max_len, d_model)
+
+pe = positional_encoding(max_len=100, d_model=512)
+print(f"Positional encoding: {pe.shape}")  # (1, 100, 512)
+```
+
+## Używanie gotowych transformerów (praktyczne)
+
+W pracy rzadko budujesz transformer od zera. Używasz Hugging Face:
+
+```python
+from transformers import AutoTokenizer, AutoModel
+import torch
+
+# BERT - do embedingów, klasyfikacji tekstu
+tokenizer = AutoTokenizer.from_pretrained('bert-base-uncased')
+model = AutoModel.from_pretrained('bert-base-uncased')
+
+texts = ["Machine learning is fascinating", "I love coding in Python"]
+inputs = tokenizer(texts, return_tensors='pt', padding=True, truncation=True, max_length=128)
+
+with torch.no_grad():
+    outputs = model(**inputs)
+
+# CLS token jako embedding całego zdania
+sentence_embeddings = outputs.last_hidden_state[:, 0, :]
+print(f"Embeddings: {sentence_embeddings.shape}")  # (2, 768)
+
+# Podobieństwo kosinus między zdaniami
+from torch.nn.functional import cosine_similarity
+sim = cosine_similarity(sentence_embeddings[0:1], sentence_embeddings[1:2])
+print(f"Podobieństwo: {sim.item():.3f}")
+```
+
+## Klasyfikacja tekstu z fine-tuningiem
+
+```python
+from transformers import AutoModelForSequenceClassification, Trainer, TrainingArguments
+
+# Model z głową klasyfikacyjną (5 klas np. sentyment 1-5 gwiazdek)
+model = AutoModelForSequenceClassification.from_pretrained(
+    'distilbert-base-uncased',
+    num_labels=5,
+)
+
+# Fine-tuning wymaga DataCollator, dataset, TrainingArguments - patrz pełny przykład:
+training_args = TrainingArguments(
+    output_dir='./results',
+    num_train_epochs=3,
+    per_device_train_batch_size=16,
+    per_device_eval_batch_size=64,
+    warmup_steps=500,
+    weight_decay=0.01,
+    logging_dir='./logs',
+    evaluation_strategy='epoch',
+)
+# trainer = Trainer(model=model, args=training_args, ...)
+print("Fine-tuning DistilBERT na własnych danych wymaga ~2-3 epok i ~30 min na GPU")
+```
+
+Następna lekcja: LLM i Prompt Engineering - jak efektywnie używać GPT, Claude i Gemini w aplikacjach.

@@ -1,0 +1,82 @@
+Prompt engineering ma problem z wizerunkiem. Z jednej strony traktowany jest jako "nie prawdziwa inżynieria" — jakbyś wpisywał magiczne zaklęcia w pole tekstowe i liczył na łut szczęścia. Z drugiej — sprzedawany jako specjalność wymagająca miesięcy nauki i drogich kursów.
+
+Prawda jest pośrodku. Prompt engineering to inżynieria behawioralna — mierzalna, testowalna, z iteracją i metrykami. Jeśli robisz to bez mierzenia efektów, to nie inżynieria — to zgadywanie.
+
+Piszę o technikach, które stosuję produkcyjnie. Nie "brzmią dobrze" — działają i są mierzalne.
+
+## System prompt to specyfikacja, nie powitanie
+
+To jest najczęstszy błąd, który widzę w projektach.
+
+System prompt "Jesteś pomocnym asystentem. Odpowiadaj na pytania użytkowników." to nie specyfikacja. To zaproszenie dla modelu do robienia co mu się podoba. I model to robi — rozmawia o polityce, krytykuje konkurencję, wymyśla nieistniejące funkcje produktu.
+
+Dobry system prompt odpowiada na sześć pytań: jaką rolę pełni model, jaki ma zakres wiedzy i odpowiedzialności, co zrobić gdy pytanie jest poza zakresem, jaki jest format odpowiedzi, czego nigdy nie robi, i — to często pomijane — przykład dobrej i złej odpowiedzi.
+
+Porównanie w praktyce. Zbudowałam kiedyś asystenta supportu dla firmy SaaS. Zaczęłam od "Jesteś asystentem supportu". Działało kiepsko — model odpowiadał na pytania o konkurencję, wymyślał funkcje, które nie istniały. Przeszłam na szczegółowy system prompt z zakresem, formatem i przykładami. 40% redukcja "halucynacji" (mierzona na 200 konwersacjach). To nie jest wrażenie — to liczba.
+
+## Zero-shot i few-shot: zacznij od prostego
+
+Zero-shot to pytanie bez przykładów. Model odpowiada na podstawie treningu. Działa dobrze dla prostych, dobrze zdefiniowanych zadań — klasyfikacja emocji, ekstrakcja faktów, proste podsumowania.
+
+Few-shot — dostarczasz przykłady poprawnych odpowiedzi przed właściwym pytaniem. Model "uczy się z kontekstu". Jest silniejszy gdy chcesz specyficznego formatu, niestandardowej logiki, albo zadania które jest subtelnie inne od typowego treningu.
+
+Ważne odkrycie (Min et al., 2022): w few-shot poprawność etykiet w przykładach ma mniejsze znaczenie niż format i dystrybucja. Model uczy się STRUKTURY odpowiedzi, nie reguł. To kontrinfuicyjne i przydatne — możesz mieć przykłady z celowo "złymi" etykietami i model i tak nauczy się właściwego formatu.
+
+## Chain-of-Thought — kiedy model musi "pomyśleć"
+
+Chain-of-Thought (CoT) to prośba o rozumowanie "na głos" przed odpowiedzią. Działa dlatego, że modele generują token po tokenie — każdy następny warunkowany na poprzednich. Gdy model generuje pośrednie kroki, każdy krok staje się kontekstem dla następnego.
+
+Samo dodanie "Pomyśl krok po kroku" poprawia accuracy na zadaniach matematycznych i logicznych o 20–40% (Kojima et al., 2022). Bez żadnych dodatkowych przykładów.
+
+Dla specjalistycznych dziedzin — prawo, medycyna, finanse — few-shot CoT (przykłady z pełnym łańcuchem rozumowania) działa jeszcze lepiej. Ale to wymaga zebrania jakościowych przykładów, co kosztuje.
+
+Kiedy NIE używać CoT: dla prostych, szybkich zadań. Zmuszanie modelu do rozumowania przy klasyfikacji sentymentu to overhead bez korzyści. CoT jest dla zadań wymagających wielokrokowego rozumowania.
+
+## Structured Outputs — koniec z parsowaniem tekstu
+
+To jedna z najważniejszych zmian praktycznych ostatnich lat. Zamiast prosić model o JSON "proszę", możesz wymusić format na poziomie API.
+
+Przed structured outputs: prompt "zwróć JSON z polami A, B, C" dawał w połowie przypadków JSON, w połowie "Oczywiście! Oto JSON: ```json ..." plus dodatkowy tekst, plus ewentualnie niepełny JSON. Każdy pipeline wymagał regexów i hacków żeby sparsować.
+
+Ze structured outputs i Pydantic:
+
+```python
+from openai import OpenAI
+from pydantic import BaseModel
+from typing import Literal
+
+class DocumentAnalysis(BaseModel):
+    category: Literal['umowa', 'aneks', 'regulamin', 'inne']
+    risk_level: Literal['niskie', 'srednie', 'wysokie']
+    requires_review: bool
+    summary: str
+
+response = client.beta.chat.completions.parse(
+    model="gpt-4o-mini",
+    messages=[{"role": "user", "content": f"Przeanalizuj dokument:\n\n{doc}"}],
+    response_format=DocumentAnalysis,
+)
+result = response.choices[0].message.parsed
+```
+
+`result` to obiekt Python, nie string. Pydantic waliduje. Jeśli model próbuje zwrócić coś spoza Literal — dostaniesz `ValidationError`, nie ciche błędne dane w produkcji.
+
+## Self-Consistency — głosowanie dla trudnych zadań
+
+Kosztuje, ale działa. Zamiast jednej odpowiedzi generujesz kilka (5–20) z wyższą temperaturą i wybierasz najczęstszą.
+
+Wang et al. (2022) pokazali 20–30% poprawę accuracy na zadaniach matematycznych i logicznych. Cena: N× więcej tokenów i czasu. Warto dla krytycznych, mało-latencji-tolerujących zadań z jednoznaczną odpowiedzią. Nie warto dla FAQ chatbota.
+
+## Moje zasady praktyczne
+
+Konkretność zamiast ogólności. "Odpowiadaj profesjonalnie" to nic. "Używaj drugiej osoby grzecznościowej, terminologii z branży finansowej, akapity max 3 zdania, bez emojis" — to coś.
+
+Testuj, nie zgaduj. Każda zmiana promptu powinna mieć miernik. Zbuduj 20–50 przypadków testowych z oczekiwanymi odpowiedziami i sprawdzaj automatycznie. "Wydaje się lepiej" to nie dane.
+
+Wersjonuj prompty jak kod. Zmiana systemu promptu to zmiana kodu produkcyjnego. W git, z opisem dlaczego i testami regresji. Widziałam projekty gdzie zaginął "stary prompt który działał" i nikt nie wiedział co dokładnie było w środku. Katastrofa.
+
+Temperature=0 dla deterministycznych zadań. Jeśli potrzebujesz powtarzalnych wyników — klasyfikacja, ekstrakcja — zawsze 0. Variability przy wyższej temperaturze to feature dla kreatywnych zastosowań.
+
+---
+
+*Chcesz zobaczyć jak te techniki wyglądają w kompletnym systemie produkcyjnym? W kolejnym artykule buduję agenta AI z narzędziami i memory.*

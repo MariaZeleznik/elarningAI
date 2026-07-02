@@ -1,0 +1,76 @@
+﻿Raporty Gartnera i McKinsey piszą o "rewolucji AI w analityce". LinkedIn jest pełen postów o "transformacji zawodu analityka". Konferencje sprzedają bilety na prelekcje o "przyszłości pracy z danymi".
+
+Ja pracuję z danymi od 14 lat i przez ostatnie 3 widziałem naprawdę wielkie zmiany u klientów. Nie z raportów - z własnych projektów. I chcę Ci opowiedzieć co *naprawdę* się zmienia, a co jest nagłówkiem bez substancji.
+
+## Co faktycznie się zmienia (obserwacje z projektów)
+
+### 1. SQL migruje do warstwy transformacji, nie znika
+
+5 lat temu pisałem SQL głównie w narzędziach BI. Dzisiaj SQL żyje przede wszystkim w dbt i podobnych frameworkach transformacji. To fundamentalna zmiana w architekturze pracy.
+
+Zamiast: analityk pisze zapytanie ad-hoc w Metabase → raport → koniec.
+Teraz: analityk pisze model w dbt → model jest wersjonowany w git, ma testy, dokumentację → wchodzi do Data Catalog → jest podstawą dla wielu narzędzi BI jednocześnie.
+
+To podwyższa standard pracy. SQL przestaje być "napisz i zapomnij", staje się kodem produkcyjnym. Dobrym i złym jednocześnie - dobry bo trwały, zły bo wymaga inżynieryjnych nawyków, których wielu analityków nie miało.
+
+W praktyce: firmy coraz częściej szukają "Analytics Engineer" zamiast "Data Analyst". Te dwa tytuły to ta sama robota - ale Analytics Engineer musi znać git, testowanie i CI/CD. To nie jest hype, widziałem to w ofertach pracy w Polsce w ostatnich 12 miesiącach.
+
+### 2. Power BI i Tableau tracą grunt na rzecz kodu
+
+Na jednym z projektów (retailer, ~1000 pracowników) zastałem środowisko z 47 dashboardami w Power BI - każdy trochę inną definicją przychodu, każdy inną metodologią liczenia konwersji. Klasyczne "single source of confusion" zamiast "single source of truth".
+
+Remedium, które coraz częściej stosuję: evidence.dev, Observable, Streamlit, lub zwykły notebook z Quarto. Kod + dane + wizualizacja w jednym miejscu, w git, z historią wersji.
+
+Nie twierdzę, że Power BI zniknie. Ale myślę, że coraz więcej firm będzie budować kluczowe metryki w kodzie, a BI zostawią dla "self-service" dla mniej technicznych użytkowników.
+
+### 3. Asystenci AI w analityce: przydatne, nie zbawienne
+
+Muszę być szczery, bo widzę dużo przesady w obie strony.
+
+Copilot w Power BI, AI w Looker, ChatGPT piszący SQL - to są realne narzędzia, które pomagają. Używam ich codziennie. Generowanie szkieletu zapytania SQL, tłumaczenie błędu, podpowiedź formuły DAX - oszczędzają mi 30–40 minut dziennie.
+
+Ale: AI nie zastępuje zrozumienia biznesu. Jeden z juniorów w projekcie, który miał słabe podstawy SQL, zaczął używać ChatGPT do generowania zapytań. Był szybszy - i generował błędne wyniki, których nie umiał zweryfikować. Bo żeby ocenić, czy zapytanie jest poprawne, musisz rozumieć co ono robi.
+
+AI jest mnożnikiem umiejętności. Jeśli nie masz umiejętności - nie masz czego mnożyć.
+
+### 4. Data Mesh: słyszałem to z 30 klientami, wdrożyłem z 2
+
+Data Mesh to architektura organizacyjna, gdzie "product ownership" danych jest zdecentralizowany do domen biznesowych. Marketing odpowiada za dane marketingowe, sprzedaż za dane sprzedażowe, etc.
+
+Teoretycznie piękne. W praktyce: wymaga dużej dojrzałości organizacyjnej, kultury inżynieryjnej i woli politycznej. Widziałem więcej nieudanych wdrożeń (zaczęto z entuzjazmem, rzucono po 6 miesiącach) niż udanych.
+
+Moja ocena: Data Mesh ma sens dla firm o skali minimum 500+ osób technicznych, z silną kulturą "teams own their products". Dla pozostałych - dobry centralny team danych z clear ownership jest lepszym rozwiązaniem.
+
+### 5. Real-time jest teraz dostępne, ale nie zawsze potrzebne
+
+ClickHouse, Apache Kafka, Redpanda - narzędzia do streaming analytics są teraz dostępne dla firm bez milionowych budżetów. To prawdziwa zmiana.
+
+Ale widziałem projekty, gdzie wdrożono streaming "bo to nowoczesne", podczas gdy biznes nie potrzebował danych szybciej niż raz na godzinę. Streaming to wyższa kompleksowość, wyższy koszt utrzymania, więcej punktów awarii.
+
+Pytanie, które zadaję przed każdym projektem streaming: "Jaka jest najgorsza rzecz, jaka się stanie jeśli te dane będą dostępne z 1h opóźnieniem?" Jeśli odpowiedź brzmi "żadna" - batch processing jest właściwym wyborem.
+
+## Co się NIE zmienia (i jak myślę, że nie zmieni się przez kolejne 10 lat)
+
+**Zrozumienie biznesu.** AI może napisać SQL, ale nie wie, że "zamówienie anulowane 5 minut po złożeniu" to inny status niż "zamówienie anulowane po 3 dniach" i że traktowanie ich tak samo psuje raport konwersji. To wie analityk, który rozmawiał z teamem sprzedaży.
+
+**Umiejętność zadawania właściwych pytań.** Dane odpowiadają na pytania - ale ktoś musi te pytania zadać. "Czy sprzedaż rośnie?" to złe pytanie. "Czy retencja klientów pierwszorzędowych z Q1 2025 jest wyższa niż z Q1 2024 po kontroli efektu sezonowości?" - to dobre pytanie. Tej umiejętności nie zastąpi żaden tool.
+
+**Komunikacja wyników.** Raport z 12 wykresami to nie insight. Insight to jedno zdanie które zmienia decyzję. Umiejętność filtrowania i opowiadania historii przez dane - coraz ważniejsza, bo narzędzia BI produkują coraz więcej wykresów.
+
+## Co powiedziałbym sobie z 2019 roku
+
+Gdybym mógł cofnąć czas, powiedziałbym sobie:
+
+**Naucz się git wcześniej.** Analitycy przez długo uważali, że git jest dla programistów. To błąd. Kod analityczny (SQL, Python, R) powinien być w git - dla wersjonowania, współpracy i historii decyzji.
+
+**Zostań w SQL głębiej, zanim przeskoczysz do Pythona.** Rozumiałem window functions - ale nie rozumiałem, kiedy partycjonowanie tabeli ma wpływ na query plan. Nauczyłem się tego za późno.
+
+**Mierz czas spędzony na ad-hoc vs. strategiczne projekty.** Przez pierwsze lata 80% czasu szłam na ad-hoc zapytania, 20% na coś trwałego. Powinno być odwrotnie. Zautomatyzowanie powtarzalnych pytań to inwestycja w swój czas.
+
+**Zaprzyjaźnij się z inżynierami danych.** Analityk + data engineer rozumiejący nawzajem swoją robotę to najlepszy team data jaki widziałem.
+
+2025 to dobry czas na bycie analitykiem danych. Narzędzia są lepsze, dane są bardziej dostępne, firmy rozumieją wartość danych bardziej niż kiedykolwiek. Ale podstawowe umiejętności - myślenie statystyczne, zrozumienie biznesu, rzetelne wnioski - są ważniejsze niż kiedykolwiek właśnie dlatego, że narzędzia tak łatwo generują błędne odpowiedzi wyglądające poprawnie.
+
+---
+
+*Chcesz zobaczyć konkretne case studies z transformacji zespołów analitycznych? Opisuję 3 projekty - co działało, co nie i dlaczego - w następnym artykule.*

@@ -1,0 +1,189 @@
+﻿---
+title: Power BI - pierwsze kroki i podstawowe dashboardy
+module: 6
+order: 6
+free: false
+duration: 50
+exercise:
+  prompt: "Napisz zapytanie M (Power Query) które wczytuje plik CSV z URL, filtruje wiersze gdzie kolumna 'status' = 'completed' i zlicza wyniki. Wstaw przykładowy kod M."
+  expected: "let\n    Source = Csv.Document(Web.Contents(\"https://example.com/data.csv\"),[Delimiter=\",\",Encoding=65001]),\n    Headers = Table.PromoteHeaders(Source),\n    Filtered = Table.SelectRows(Headers, each [status] = \"completed\"),\n    Count = Table.RowCount(Filtered)\nin\n    Count"
+  hint: "W Power Query użyj let...in, Csv.Document() do wczytania, Table.SelectRows() do filtrowania, Table.RowCount() do zliczenia"
+  language: sql
+---
+
+Kiedy trafiłam na Power BI, byłam sceptyczna - "kolejne narzędzie do robienia wykresów". Zmieniłam zdanie gdy zobaczyłam jak data analyst bez jednej linii kodu zbudował dashboard który generował 40-stronnicowe raporty jednym kliknięciem "Refresh". Oto co naprawdę oferuje Power BI.
+
+## Power BI - czym jest i do czego służy
+
+Power BI to platforma Business Intelligence od Microsoft składająca się z trzech warstw:
+1. **Power Query** - ETL (Extract, Transform, Load): wczytywanie i czyszczenie danych
+2. **Data Model** - relacje między tabelami, hierarchie, miary
+3. **Raportowanie** - wizualizacje, dashboardy, filtry
+
+**Kiedy Power BI, kiedy Python/SQL?**
+
+Power BI wygrywa przy:
+- Raportach które muszą być odświeżane cyklicznie
+- Dashboardach dla kierownictwa bez wiedzy technicznej
+- Danych z wielu źródeł (Excel + SQL + Salesforce)
+- Udostępnianiu raportów w organizacji (Power BI Service)
+
+Python/SQL wygrywa przy:
+- Zaawansowanej analizie statystycznej
+- ML i predykcji
+- Automatyzacji i skryptach
+
+## Interfejs Power BI Desktop
+
+```
+┌──────────────────────────────────────────────────────┐
+│  File  Home  Insert  Modeling  View  Help            │
+├──────────────────────────────────────────────────────┤
+│                                              │ Fields │
+│     Obszar raportu (canvas)                  │ pane  │
+│     [Tutaj przeciągasz wizualizacje]         │       │
+│                                              │ Viz   │
+│                                              │ pane  │
+├──────────────────────────────────────────────│       │
+│ Pages: Strona 1 | + Dodaj stronę             │       │
+└──────────────────────────────────────────────────────┘
+```
+
+Trzy widoki (lewy panel):
+- 📊 **Report** - budujesz wizualizacje
+- 🗃️ **Data** - przeglądasz tabele
+- 🔗 **Model** - rysujesz relacje między tabelami
+
+## Power Query - wczytywanie i czyszczenie danych
+
+Power Query używa języka M. Większość operacji to kliknięcia w UI, ale warto rozumieć co się dzieje pod spodem:
+
+```m
+// Przykład: wczytaj plik Excel, usuń duplikaty, zmień typy
+let
+    // Krok 1: Źródło danych
+    Zrodlo = Excel.Workbook(File.Contents("C:\dane\sprzedaz_2025.xlsx"), null, true),
+    
+    // Krok 2: Wybierz arkusz
+    ArkuszSprzedaz = Zrodlo{[Item="Sprzedaż",Kind="Sheet"]}[Data],
+    
+    // Krok 3: Pierwsza linia jako nagłówki
+    PromowaneNaglowki = Table.PromoteHeaders(ArkuszSprzedaz, [PromoteAllScalars=true]),
+    
+    // Krok 4: Zmień typy kolumn
+    ZmienioneTypy = Table.TransformColumnTypes(PromowaneNaglowki, {
+        {"Data zamówienia", type date},
+        {"Wartość", type number},
+        {"Klient ID", type text}
+    }),
+    
+    // Krok 5: Usuń duplikaty
+    BezDuplikatow = Table.Distinct(ZmienioneTypy, {"Zamówienie ID"}),
+    
+    // Krok 6: Filtruj (tylko zrealizowane)
+    Zrealizowane = Table.SelectRows(BezDuplikatow, each [Status] = "Completed"),
+    
+    // Krok 7: Dodaj kolumnę obliczoną
+    ZKwartalem = Table.AddColumn(Zrealizowane, "Kwartał", each 
+        "Q" & Text.From(Date.QuarterOfYear([Data zamówienia])) & 
+        " " & Text.From(Date.Year([Data zamówienia])))
+
+in
+    ZKwartalem
+```
+
+Większość tych kroków robisz klikając w interfejsie, ale M-code jest generowany automatycznie i możesz go edytować.
+
+## Model danych - gwiazda i płatek śniegu
+
+Dobry model danych to klucz do wydajnych raportów. Wzorzec "gwiazda" (Star Schema):
+
+```
+              [Tabela wymiarów: Daty]
+                      │
+[Wymiar: Klienci] ── [Tabela Fakty: Zamówienia] ── [Wymiar: Produkty]
+                      │
+              [Wymiar: Regiony]
+```
+
+Tabela fakty: miary (przychód, ilość, marża)
+Tabele wymiarów: kontekst (kto, kiedy, co, gdzie)
+
+**Relacje w Power BI:** zawsze wiele-do-jednego (N:1) od faktów do wymiarów. Kierunek filtrowania: wymiar → fakty.
+
+## DAX - podstawowe miary
+
+DAX (Data Analysis Expressions) to język miar w Power BI:
+
+```dax
+-- Prosta miara: suma sprzedaży
+Suma sprzedaży = SUM(Zamówienia[Wartość])
+
+-- Sprzedaż za poprzedni rok
+Sprzedaż rok temu =
+CALCULATE(
+    [Suma sprzedaży],
+    DATEADD(Daty[Data], -1, YEAR)
+)
+
+-- YoY Growth (rok do roku)
+YoY Growth % =
+DIVIDE(
+    [Suma sprzedaży] - [Sprzedaż rok temu],
+    [Sprzedaż rok temu],
+    0   -- wartość domyślna gdy dzielnik = 0
+)
+
+-- Liczba unikatowych klientów
+Liczba klientów = DISTINCTCOUNT(Zamówienia[Klient ID])
+
+-- Wartość koszyka (AOV)
+Średni koszyk = DIVIDE([Suma sprzedaży], [Liczba zamówień])
+```
+
+## Budowanie dashboardu krok po kroku
+
+**Krok 1:** Wczytaj dane (Home → Get Data → Excel/SQL/CSV)
+
+**Krok 2:** Zdefiniuj relacje (Model widok → przeciągnij klucze)
+
+**Krok 3:** Stwórz miary DAX (Right click tabela → New Measure)
+
+**Krok 4:** Buduj wizualizacje:
+- Card (KPI): przeciągnij miarę → wybierz "Card"
+- Bar Chart: oś X = kategoria, oś Y = miara
+- Line Chart: oś X = data, oś Y = miara, legenda = wymiar
+- Matrix: wiersze + kolumny + wartości (jak pivot table)
+
+**Krok 5:** Dodaj Slicery (filtry dla użytkownika):
+- Slicer → pole = rok/miesiąc/region
+
+**Krok 6:** Formatuj (kolory firmowe, tytuły, tło)
+
+## Dobrze i źle zaprojektowany dashboard
+
+❌ **Źle:**
+- 20 wizualizacji na jednej stronie
+- Różne kolory bez znaczenia
+- Brak tytułów i kontekstu
+- Wykresy kołowe z 8 segmentami
+
+✅ **Dobrze:**
+- Maksymalnie 5-7 wizualizacji na stronie
+- Jeden kolor dominujący + akcent dla wartości kluczowych
+- Każda strona odpowiada na jedno pytanie
+- Wniosek w tytule strony ("Sprzedaż Q1 o 12% powyżej celu")
+
+## Publikowanie do Power BI Service
+
+```
+Power BI Desktop → File → Publish → Wybierz workspace
+
+W Power BI Service (browser):
+- Automatyczne odświeżanie danych (schedule refresh)
+- Udostępnianie innym użytkownikom
+- Subskrypcje emailowe (raport w PDF o ustalonej godzinie)
+- Integracja z Teams (dashboard jako zakładka)
+```
+
+Następna lekcja: Power BI zaawansowany - DAX dla analityków i Time Intelligence.

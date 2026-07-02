@@ -1,0 +1,176 @@
+﻿---
+title: Data Storytelling - jak komunikować wyniki analiz
+module: 9
+order: 9
+free: false
+duration: 45
+exercise:
+  prompt: "Napisz w Python funkcję format_insight(metric_name, current_value, previous_value, unit='') która zwraca zdanie z opisem zmiany. Np. format_insight('Sprzedaż', 156000, 142000, 'PLN') → 'Sprzedaż wzrosła o 9.9% do 156 000 PLN (vs 142 000 PLN poprzednio)'"
+  expected: "def format_insight(metric_name, current_value, previous_value, unit=''):\n    change_pct = (current_value - previous_value) / previous_value * 100\n    direction = 'wzrosła' if change_pct > 0 else 'spadła'\n    return f'{metric_name} {direction} o {abs(change_pct):.1f}% do {current_value:,.0f} {unit} (vs {previous_value:,.0f} {unit} poprzednio)'\nprint(format_insight('Sprzedaż', 156000, 142000, 'PLN'))"
+  hint: "Oblicz change_pct = (current - previous) / previous * 100, użyj formatowania liczb z :,.0f"
+  language: python
+---
+
+Miałam koleżankę, świetną analityczkę, która regularnie produkowała 30-stronicowe raporty pełne świetnych analiz. Szef nigdy nie czytał dalej niż strona 3. Inna koleżanka, mniej technicznie zaawansowana, przychodziła z jednym slajdem i jednym zdaniem wniosku. Szef zapamiętywał jej wnioski i wdrażał rekomendacje. Data storytelling to często ważniejsze niż sama analiza.
+
+## Co to jest Data Storytelling
+
+Data storytelling to sztuka przekształcania wyników analizy w narrację która:
+- Jest zrozumiała dla osoby bez wiedzy technicznej
+- Prowadzi do konkretnej decyzji
+- Jest zapamiętana tydzień po prezentacji
+
+Trzy składniki:
+1. **Dane** - fakty, liczby, analizy (to co robisz w SQL/Python)
+2. **Wizualizacja** - wybór właściwego wykresu, uproszczenie
+3. **Narracja** - co te liczby ZNACZĄ i co z tym ZROBIĆ
+
+## Struktura analitycznej narracji
+
+### Piramida McKinseya (SCQA Framework)
+
+```
+Situation → Complication → Question → Answer
+
+Przykład:
+S: "Sprzedaż w Q1 wyniosła 1.2M PLN, +8% vs rok temu."
+C: "Jednak 3 z 5 regionów są poniżej celu. Warszawa odpowiada za 80% wzrostu."
+Q: "Czy wzrost jest bezpieczny w długim terminie?"
+A: "Rekomendacja: wzmocnić sales w regionach Południe i Wschód - tam jest rezerwa wzrostu."
+```
+
+### Struktura jednego slajdu
+
+```
+┌─────────────────────────────────────────────┐
+│ WNIOSEK (tytuł): "Konwersja wzrosła o 23%   │
+│  po zmianie przycisku CTA - wdrożyć na 100%" │
+├─────────────────────────────────────────────┤
+│                                             │
+│  [Wykres: konwersja A vs B w czasie]        │
+│                                             │
+│  A: 2.8%  →  B: 3.4%  (+21%)               │
+│  p=0.003, n=12 000 per grupa                │
+│                                             │
+├─────────────────────────────────────────────┤
+│ Działanie: Wdrożenie do staging do piątku   │
+└─────────────────────────────────────────────┘
+```
+
+Uwaga: tytuł to wniosek, nie opis wykresu.
+
+## Zasady przekonującej prezentacji danych
+
+### 1. Jeden slajd = jeden wniosek
+
+```python
+# Zły podejście: "Analiza sprzedaży Q1"
+slajdy_zle = [
+    "Sprzedaż Q1 - przegląd",           # Nic to nie mówi
+    "Dane sprzedażowe za Q1 2025",       # To nie jest wniosek
+    "Wykres konwersji",                  # Opis wykresu, nie wniosek
+]
+
+# Dobry podejście: każdy slajd = decyzja lub wniosek
+slajdy_dobrze = [
+    "Łączna sprzedaż Q1 przekroczyła cel o 8% - tempo do utrzymania",
+    "Warszawa odpowiada za 80% wzrostu - ryzyko koncentracji geograficznej",
+    "3 regiony poniżej celu - rekomendacja: dodatkowe zasoby sales Q2",
+    "Zmiana CTA podniosła konwersję o 23% - wdrożyć natychmiast",
+]
+```
+
+### 2. Kontekst zawsze
+
+```python
+def format_metric_with_context(
+    nazwa: str,
+    wartość: float,
+    cel: float,
+    poprzedni_rok: float,
+    jednostka: str = "PLN"
+) -> str:
+    vs_cel = (wartość - cel) / cel * 100
+    vs_py = (wartość - poprzedni_rok) / poprzedni_rok * 100
+    
+    kierunek_cel = "powyżej" if vs_cel >= 0 else "poniżej"
+    kierunek_py = "wzrost" if vs_py >= 0 else "spadek"
+    
+    return (
+        f"{nazwa}: {wartość:,.0f} {jednostka}\n"
+        f"  vs cel: {kierunek_cel} o {abs(vs_cel):.1f}%\n"
+        f"  vs rok temu: {kierunek_py} o {abs(vs_py):.1f}%"
+    )
+
+print(format_metric_with_context("Sprzedaż Q1", 1_287_000, 1_200_000, 1_190_000))
+# Sprzedaż Q1: 1,287,000 PLN
+#   vs cel: powyżej o 7.3%
+#   vs rok temu: wzrost o 8.1%
+```
+
+### 3. Highlight, nie pokazuj wszystkiego
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Dane: sprzedaż per region
+regiony = ['Mazowsze', 'Śląsk', 'Wielkopolska', 'Dolny Śląsk', 'Małopolska', 'Łódź']
+sprzedaz = [487, 234, 198, 134, 156, 98]
+cel = [450, 250, 220, 160, 140, 120]
+
+# Wersja ŹLE: wszystkie regiony jednakowo
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+
+ax1.bar(regiony, sprzedaz, color='steelblue')
+ax1.set_title('ŹLE: Sprzedaż per region (mało informacyjne)')
+ax1.tick_params(axis='x', rotation=45)
+
+# Wersja DOBRZE: highlight regiony poniżej celu
+colors = ['#EF5350' if s < c else '#43A047' for s, c in zip(sprzedaz, cel)]
+bars = ax2.bar(regiony, sprzedaz, color=colors)
+ax2.axhline(y=np.mean(cel), color='black', linestyle='--', linewidth=1, label='Śr. cel')
+
+# Etykiety tylko dla poniżej celu
+for bar, s, c, r in zip(bars, sprzedaz, cel, regiony):
+    if s < c:
+        ax2.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 3,
+                f'-{(c-s)/c:.0%}', ha='center', fontsize=9, color='#EF5350', fontweight='bold')
+
+ax2.set_title('DOBRZE: "3 regiony poniżej celu - działanie wymagane"')
+ax2.tick_params(axis='x', rotation=45)
+ax2.legend()
+
+plt.tight_layout()
+plt.savefig('storytelling_example.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+## Executive Summary - format dla zarządu
+
+```markdown
+## Wyniki Q1 2025 - podsumowanie dla zarządu
+
+**Dobra wiadomość:** Całkowita sprzedaż 1,287 tys. PLN (+8% YoY, +7.3% vs cel)
+
+**Wyzwanie:** 3 z 6 regionów poniżej celu (Śląsk -6.4%, Dolny Śląsk -16.3%, Łódź -18.3%)
+
+**Rekomendacja:** Przesunięcie 2 handlowców z Mazowsza do Łodzi i Dolnego Śląska na Q2 
+- szacowany wpływ: +80-120 tys. PLN w Q2
+
+**Decyzja wymagana do:** 15 marca
+```
+
+Jedna strona. Trzy punkty. Jedna decyzja. Termin.
+
+## Prawa narracji vs dane
+
+Narracja nie może manipulować danymi, ale powinna:
+- Wybrać WŁAŚCIWE dane do opowiedzenia historii
+- Uprościć bez zniekształcenia
+- Wskazać co jest ważne, co pominąć
+- Zaproponować rekomendację opartą na danych
+
+**Granica etyczna:** jeśli musisz ukrywać dane żeby twoja historia "zadziałała" - to nie storytelling, to propaganda. Analityk ma obowiązek pokazywać pełny obraz, nawet gdy jest niesprzyjający.
+
+Następna lekcja: Big Data i Cloud - SQL na miliardach wierszy z BigQuery.

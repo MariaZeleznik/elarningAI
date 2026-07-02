@@ -1,0 +1,92 @@
+﻿---
+title: SQL dla analityków
+module: 2
+order: 2
+free: true
+duration: 45
+---
+
+Po 10 latach pracy z danymi mogę powiedzieć jedno: SQL to język, którego nauczenie się zwróci Ci się stokrotnie. Każda baza danych - PostgreSQL, MySQL, SQLite, BigQuery, Snowflake - używa SQL. Nauczysz się raz, pracujesz wszędzie.
+
+## SELECT - podstawa wszystkiego
+
+```sql
+-- Pobierz wszystkich klientów z Warszawy
+SELECT imie, nazwisko, email
+FROM klienci
+WHERE miasto = 'Warszawa'
+ORDER BY nazwisko ASC;
+```
+
+Każde zapytanie SELECT ma tę samą logikę:
+1. **SELECT** - co chcę zobaczyć (kolumny)
+2. **FROM** - skąd (tabela)
+3. **WHERE** - filtr (warunek)
+4. **ORDER BY** - sortowanie
+
+## JOIN - łączenie tabel
+
+Siła SQL tkwi w łączeniu danych z wielu tabel.
+
+```sql
+-- Zamówienia z danymi klientów
+SELECT 
+  k.imie,
+  k.nazwisko,
+  z.data_zamowienia,
+  z.kwota
+FROM zamowienia z
+JOIN klienci k ON z.klient_id = k.id
+WHERE z.kwota > 500
+ORDER BY z.data_zamowienia DESC;
+```
+
+### Typy JOINów
+
+| JOIN | Co zwraca |
+|------|-----------|
+| INNER JOIN | Tylko pasujące wiersze z obu tabel |
+| LEFT JOIN | Wszystko z lewej + pasujące z prawej (NULL jeśli brak) |
+| RIGHT JOIN | Odwrotność LEFT JOIN |
+| FULL OUTER JOIN | Wszystko z obu tabel |
+
+**Praktyczna zasada:** 90% czasu używasz INNER JOIN lub LEFT JOIN. Reszta jest rzadkością.
+
+## GROUP BY - agregacje
+
+```sql
+-- Sprzedaż per kategoria produktu
+SELECT 
+  kategoria,
+  COUNT(*) AS liczba_zamowien,
+  SUM(kwota) AS laczna_sprzedaz,
+  AVG(kwota) AS srednia_wartosc
+FROM zamowienia
+GROUP BY kategoria
+HAVING SUM(kwota) > 10000  -- HAVING filtruje grupy (nie wiersze)
+ORDER BY laczna_sprzedaz DESC;
+```
+
+## Window Functions - zaawansowane
+
+```sql
+-- Ranking klientów po wartości zamówień
+SELECT 
+  imie,
+  nazwisko,
+  SUM(kwota) AS laczna_wartosc,
+  RANK() OVER (ORDER BY SUM(kwota) DESC) AS ranking
+FROM zamowienia z
+JOIN klienci k ON z.klient_id = k.id
+GROUP BY k.id, imie, nazwisko;
+```
+
+## Ćwiczenie
+
+Masz tabelę `sprzedaz` z kolumnami: `data`, `produkt`, `region`, `kwota`. Napisz zapytanie, które zwróci top 3 produkty per region, posortowane malejąco po łącznej sprzedaży.
+
+Wskazówka: użyj GROUP BY z RANK() OVER (PARTITION BY region ORDER BY SUM(kwota) DESC).
+
+---
+
+W następnej lekcji: **Excel w analizie - Power Query i tabele przestawne**.

@@ -1,0 +1,126 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 520 420" width="520" height="420">
+  <defs>
+    <linearGradient id="screenGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Laptop base -->
+  <ellipse cx="260" cy="370" rx="180" ry="18" fill="#1B2E4B" opacity="0.4"/>
+
+  <!-- Laptop bottom -->
+  <rect x="80" y="320" width="360" height="24" rx="4" fill="#233044"/>
+
+  <!-- Laptop hinge -->
+  <rect x="80" y="316" width="360" height="8" rx="2" fill="#1a2535"/>
+
+  <!-- Screen background -->
+  <rect x="90" y="60" width="340" height="260" rx="8" fill="#0f172a"/>
+
+  <!-- Screen frame -->
+  <rect x="82" y="52" width="356" height="276" rx="12" fill="#233044"/>
+  <rect x="90" y="60" width="340" height="260" rx="6" fill="url(#screenGrad)"/>
+
+  <!-- Code editor UI on screen -->
+  <!-- Editor tabs -->
+  <rect x="90" y="60" width="340" height="24" rx="0" fill="#1e293b"/>
+  <rect x="90" y="60" width="8" height="24" fill="#1e293b"/>
+  <rect x="90" y="78" width="8" height="6" fill="#1e293b"/>
+
+  <!-- Tab 1 (active) -->
+  <rect x="96" y="62" width="90" height="22" rx="4" fill="#0f172a"/>
+  <text x="108" y="77" font-family="monospace" font-size="10" fill="#94a3b8">model.py</text>
+
+  <!-- Tab 2 -->
+  <rect x="194" y="62" width="80" height="22" rx="4" fill="#1e293b" opacity="0.7"/>
+  <text x="206" y="77" font-family="monospace" font-size="10" fill="#475569">train.py</text>
+
+  <!-- Window controls (dots) -->
+  <circle cx="360" cy="73" r="5" fill="#ef4444" opacity="0.7"/>
+  <circle cx="378" cy="73" r="5" fill="#f59e0b" opacity="0.7"/>
+  <circle cx="396" cy="73" r="5" fill="#10b981" opacity="0.7"/>
+
+  <!-- Code lines -->
+  <!-- Line 1 - import -->
+  <rect x="104" y="98" width="20" height="7" rx="2" fill="#7c3aed" opacity="0.8"/>
+  <rect x="130" y="98" width="55" height="7" rx="2" fill="#64748b" opacity="0.7"/>
+
+  <!-- Line 2 -->
+  <rect x="104" y="112" width="20" height="7" rx="2" fill="#7c3aed" opacity="0.8"/>
+  <rect x="130" y="112" width="45" height="7" rx="2" fill="#64748b" opacity="0.7"/>
+
+  <!-- Line 3 blank -->
+  <rect x="104" y="130" width="8" height="7" rx="2" fill="#0EA5A0" opacity="0.9"/>
+  <rect x="118" y="130" width="60" height="7" rx="2" fill="#f59e0b" opacity="0.8"/>
+  <rect x="184" y="130" width="15" height="7" rx="2" fill="#64748b" opacity="0.5"/>
+
+  <!-- Line 4 - indent -->
+  <rect x="120" y="144" width="25" height="7" rx="2" fill="#64748b" opacity="0.7"/>
+  <rect x="151" y="144" width="55" height="7" rx="2" fill="#10b981" opacity="0.8"/>
+  <rect x="212" y="144" width="20" height="7" rx="2" fill="#64748b" opacity="0.5"/>
+
+  <!-- Line 5 -->
+  <rect x="120" y="158" width="70" height="7" rx="2" fill="#64748b" opacity="0.7"/>
+  <rect x="196" y="158" width="40" height="7" rx="2" fill="#0EA5A0" opacity="0.8"/>
+
+  <!-- Line 6 -->
+  <rect x="120" y="172" width="30" height="7" rx="2" fill="#64748b" opacity="0.5"/>
+
+  <!-- Separator -->
+  <line x1="104" y1="186" x2="420" y2="186" stroke="#1e3a5f" stroke-width="1"/>
+
+  <!-- Terminal / output area -->
+  <rect x="90" y="188" width="340" height="132" rx="0" fill="#0a0f1a"/>
+  <rect x="90" y="314" width="340" height="6" rx="0" fill="#0a0f1a"/>
+
+  <!-- Terminal text -->
+  <text x="104" y="206" font-family="monospace" font-size="10" fill="#10b981">$ python train.py --epochs 50</text>
+  <text x="104" y="222" font-family="monospace" font-size="10" fill="#64748b">Epoch 1/50 - loss: 0.8432 - acc: 0.6124</text>
+  <text x="104" y="238" font-family="monospace" font-size="10" fill="#64748b">Epoch 10/50 - loss: 0.4521 - acc: 0.8234</text>
+  <text x="104" y="254" font-family="monospace" font-size="10" fill="#64748b">Epoch 25/50 - loss: 0.2103 - acc: 0.9187</text>
+  <text x="104" y="270" font-family="monospace" font-size="10" fill="#0EA5A0">Epoch 50/50 - loss: 0.0934 - acc: 0.9742</text>
+
+  <!-- Progress bar -->
+  <rect x="104" y="284" width="200" height="8" rx="4" fill="#1e293b"/>
+  <rect x="104" y="284" width="190" height="8" rx="4" fill="#0EA5A0" opacity="0.8"/>
+
+  <!-- Cursor blinking line -->
+  <rect x="104" y="296" width="8" height="10" rx="1" fill="#0EA5A0" opacity="0.9" filter="url(#glow)"/>
+
+  <!-- Neural network floating decoration (top right) -->
+  <!-- Nodes -->
+  <circle cx="420" cy="100" r="7" fill="#0EA5A0" opacity="0.6" filter="url(#glow)"/>
+  <circle cx="440" cy="125" r="5" fill="#7c3aed" opacity="0.6"/>
+  <circle cx="415" cy="148" r="7" fill="#0EA5A0" opacity="0.5"/>
+  <circle cx="445" cy="165" r="5" fill="#f59e0b" opacity="0.6"/>
+
+  <!-- Connections -->
+  <line x1="420" y1="100" x2="440" y2="125" stroke="#0EA5A0" stroke-width="1.5" opacity="0.4"/>
+  <line x1="440" y1="125" x2="415" y2="148" stroke="#0EA5A0" stroke-width="1.5" opacity="0.4"/>
+  <line x1="415" y1="148" x2="445" y2="165" stroke="#0EA5A0" stroke-width="1.5" opacity="0.4"/>
+  <line x1="420" y1="100" x2="415" y2="148" stroke="#7c3aed" stroke-width="1" opacity="0.3"/>
+
+  <!-- Certificate badge (floating below screen) -->
+  <rect x="170" y="338" width="180" height="40" rx="20" fill="#1B2E4B" opacity="0.9"/>
+  <circle cx="198" cy="358" r="12" fill="#F59E0B" opacity="0.9"/>
+  <text x="198" y="363" font-family="serif" font-size="14" fill="#1B2E4B" text-anchor="middle" font-weight="bold">🏆</text>
+  <text x="280" y="363" font-family="system-ui, sans-serif" font-size="12" fill="#94a3b8" text-anchor="middle">Certyfikat Neurova</text>
+
+  <!-- Floating Python logo hint -->
+  <circle cx="100" cy="120" r="18" fill="#1e293b" opacity="0.8"/>
+  <text x="100" y="126" font-family="monospace" font-size="14" fill="#f59e0b" text-anchor="middle">Py</text>
+
+  <!-- Floating data chart -->
+  <g transform="translate(56, 220)">
+    <rect width="48" height="60" rx="4" fill="#1e293b" opacity="0.85"/>
+    <!-- Bar chart mini -->
+    <rect x="6" y="40" width="8" height="16" rx="2" fill="#0EA5A0" opacity="0.8"/>
+    <rect x="20" y="28" width="8" height="28" rx="2" fill="#0EA5A0" opacity="0.8"/>
+    <rect x="34" y="34" width="8" height="22" rx="2" fill="#f59e0b" opacity="0.8"/>
+  </g>
+</svg>

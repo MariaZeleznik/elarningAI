@@ -1,0 +1,280 @@
+﻿---
+title: Wprowadzenie do AI i Machine Learning
+module: 1
+order: 1
+free: true
+duration: 45
+exercise:
+  prompt: "Wczytaj dataset Iris i przypisz cechy do zmiennej X, a etykiety do zmiennej y. Użyj funkcji load_iris z parametrem return_X_y=True."
+  expected: "from sklearn.datasets import load_iris\nX, y = load_iris(return_X_y=True)"
+  hint: "Zaimportuj load_iris, a następnie wywołaj ją z return_X_y=True i rozpakuj do X, y"
+  language: python
+---
+
+Kiedy pierwszy raz usłyszałam słowo "sztuczna inteligencja", wyobraziłam sobie roboty z filmów sci-fi - HAL 9000, Terminator, R2-D2. Rzeczywistość jest bardziej przyziemna i - paradoksalnie - dużo bardziej fascynująca.
+
+AI nie jest magią. To matematyka, statystyka i bardzo dużo danych. Zrozumienie tego fundamentu zmienia sposób, w jaki myślisz o każdym systemie AI, z którym się stykasz.
+
+## Hierarchia pojęć: AI, ML, DL, LLM
+
+Zacznijmy od mapy, którą będziemy rozwijać przez cały kurs:
+
+```
+Sztuczna Inteligencja (AI)
+│
+├── Machine Learning (ML)
+│   ├── Klasyczne algorytmy (regresja, drzewa, SVM)
+│   └── Deep Learning (DL)
+│       ├── CNN - obrazy
+│       ├── RNN / LSTM - sekwencje, audio
+│       └── Transformery
+│           └── Large Language Models (LLM)
+│               └── ChatGPT, Claude, Gemini, LLaMA
+│
+└── Systemy regułowe (ekspertowe) - starsze podejście, bez uczenia
+```
+
+**Sztuczna Inteligencja (AI)** to najszersza kategoria: każdy system komputerowy, który wykonuje zadania wymagające wcześniej "ludzkiej inteligencji" - wnioskowanie, rozpoznawanie wzorców, tłumaczenie, planowanie.
+
+**Machine Learning (ML)** to podzbiór AI, gdzie systemy *uczą się z danych* zamiast wykonywać zakodowane na stałe reguły. Kluczowa różnica:
+
+| Podejście tradycyjne | Machine Learning |
+|---------------------|-----------------|
+| Programista pisze reguły: `if temperatura > 38 then gorączka` | Model uczy się reguł z tysięcy przykładów `{temperatura, objawy}` → `{diagnoza}` |
+| Reguły muszą być znane i zakodowane | Model odkrywa zależności niewidoczne dla człowieka |
+| Kruche - jeden edge case psuje system | Odporne - uczy się ze statystyki, nie z wyjątków |
+| Wymaga eksperta domenowego do każdej reguły | Wymaga danych z etykietami |
+
+**Deep Learning (DL)** to podzbiór ML używający wielowarstwowych sieci neuronowych. Zasadniczo potrzebuje dużo więcej danych niż klasyczny ML, ale może odkrywać znacznie bardziej złożone wzorce - np. czy zdjęcie rentgenowskie pokazuje raka.
+
+**LLM (Large Language Models)** to bardzo duże sieci neuronowe oparte na architekturze Transformer, wytrenowane na setkach miliardów tokenów tekstu. GPT-4, Claude, Gemini - to wszystko LLM. Wrócimy do tej architektury szczegółowo w module 3.
+
+## Trzy rodzaje uczenia maszynowego
+
+### 1. Uczenie nadzorowane (Supervised Learning)
+
+Model uczy się z **etykietowanych** danych: każdy przykład wejściowy ma przypisaną poprawną odpowiedź.
+
+```
+Dane treningowe:
+  Email "Wygrałeś iPhone!" → etykieta: SPAM
+  Email "Meeting w piątek" → etykieta: NIE SPAM
+  Email "Faktura za usługi" → etykieta: NIE SPAM
+  ... (tysiące przykładów)
+
+Model uczy się granicy decyzyjnej.
+
+Nowe dane:
+  Email "Odbierz nagrodę!!" → model przewiduje: SPAM
+```
+
+**Kiedy używamy:** filtrowanie spamu, wykrywanie chorób ze zdjęć, predykcja cen mieszkań, tłumaczenie maszynowe, rozpoznawanie mowy.
+
+**Co jest potrzebne:** zbiór danych z etykietami. To często najtrudniejsza i najdroższa część - etykietowanie danych przez ludzi.
+
+### 2. Uczenie nienadzorowane (Unsupervised Learning)
+
+Model dostaje **tylko dane bez etykiet** i sam odkrywa struktury, wzorce, grupy.
+
+```
+Dane wejściowe (bez etykiet):
+  Klienci z atrybutami: wiek, przychód, częstość zakupów, kategorie produktów
+
+Model odkrywa grupy:
+  Segment A: 25-35 lat, wysoki przychód, zakupy premium, rzadkie
+  Segment B: 45-55 lat, średni przychód, zakupy regularne, codzienne
+  Segment C: 18-24 lat, niski przychód, zakupy impulsywne, promocje
+```
+
+**Kiedy używamy:** segmentacja klientów, wykrywanie anomalii (fraudy w kartach kredytowych), kompresja danych (PCA), rekomendacje produktów.
+
+**Najważniejszy algorytm na start:** K-Means - grupuje dane w k skupień minimalizując odległość do centroidu grupy.
+
+### 3. Uczenie przez wzmocnienie (Reinforcement Learning)
+
+Agent uczy się przez **interakcję ze środowiskiem**: otrzymuje nagrodę za dobre działania, karę za złe. Nie ma etykiet - tylko sygnał nagrody.
+
+```
+Agent (np. bot do gry):
+  Stan: obecna plansza szachowa
+  Akcja: ruch figury
+  Nagroda: +1 za wygraną, -1 za przegraną, 0 za remis
+
+Po milionach gier: agent odkrywa strategie,
+których ludzie nie wpadli przez stulecia.
+```
+
+**Kiedy używamy:** AlphaGo/AlphaZero (gry planszowe), autonomiczne roboty, trading algorytmiczny, systemy rekomendacji z ciągłą pętlą sprzężenia zwrotnego, RLHF (trenowanie LLM na ludzkich preferencjach - to właśnie tak działa ChatGPT).
+
+## Jak faktycznie działa trenowanie modelu?
+
+To najważniejsza koncepcja w tym module - reszta kursu na niej się opiera.
+
+```
+DANE TRENINGOWE
+(X = wejście, y = etykieta)
+        │
+        ▼
+┌───────────────────┐
+│      MODEL        │◄─── Parametry (wagi)
+│  f(X) → ŷ        │     np. 175 miliardów liczb
+└───────────────────┘     w GPT-3
+        │
+        ▼
+    Predykcja ŷ
+        │
+        ▼
+┌───────────────────┐
+│  Funkcja straty   │  → Mierzy błąd: L(y, ŷ)
+└───────────────────┘     np. MSE, Cross-Entropy
+        │
+        ▼
+┌───────────────────┐
+│  Backpropagation  │  → Oblicza gradient ∂L/∂w
+│  + Gradient       │     dla każdego parametru
+│    Descent        │
+└───────────────────┘
+        │
+        ▼
+  Aktualizacja wag: w := w - α · ∂L/∂w
+        │
+        └─────────────────────────► powtórz
+                                    (tysiące epok)
+```
+
+**Trzy kluczowe koncepcje do zapamiętania:**
+
+**Parametry (wagi)** - liczby wewnątrz modelu, które są *uczone* z danych. GPT-3 ma 175 miliardów takich parametrów. Ty nie piszesz ich ręcznie - algorytm je znajduje.
+
+**Funkcja straty (loss)** - miara błędu modelu. Im niższy loss, tym model lepiej dopasowany do danych treningowych. Typowe: Mean Squared Error dla regresji, Cross-Entropy dla klasyfikacji.
+
+**Gradient Descent** - algorytm minimalizacji funkcji straty. Oblicza kierunek "w dół" w przestrzeni parametrów i wykonuje małe kroki w tym kierunku. `α` (learning rate) to rozmiar kroku - za duże prowadzi do niestabilności, za małe do bardzo powolnego uczenia.
+
+## Ekosystem Pythona w AI/ML
+
+Python stał się domyślnym językiem ML z jednego prostego powodu: ma najlepszy ekosystem bibliotek. Zestawienie tego, co będziemy używać:
+
+| Biblioteka | Zastosowanie | Kiedy sięgasz |
+|-----------|-------------|--------------|
+| **NumPy** | Obliczenia na macierzach | Zawsze - to fundament |
+| **pandas** | Dane tabelaryczne (wczytywanie, czyszczenie, EDA) | Przygotowanie danych |
+| **Matplotlib / Seaborn** | Wizualizacje | Eksploracja i prezentacja |
+| **scikit-learn** | Klasyczne ML (regresja, klasyfikacja, clustering) | Większość zadań poza deep learning |
+| **PyTorch** | Sieci neuronowe, głębokie uczenie | Deep learning, badania |
+| **TensorFlow / Keras** | Sieci neuronowe (głównie produkcja) | Deploy na urządzenia mobilne, edge |
+| **Hugging Face Transformers** | Gotowe LLM, fine-tuning | NLP, LLM, transfer learning |
+| **LangChain / LlamaIndex** | Budowanie aplikacji z LLM | RAG, agenci, integracje |
+
+Przez pierwsze 3 moduły skupiamy się na scikit-learn i NumPy. Od modułu 4 - PyTorch i sieci neuronowe.
+
+## Pierwsze środowisko - zanim zaczniesz
+
+Zanim przejdziemy do kodu, upewnij się że masz działające środowisko:
+
+```bash
+# Zweryfikuj wersję Pythona (wymagana 3.10+)
+python --version
+
+# Instalacja podstawowych bibliotek
+pip install scikit-learn pandas numpy matplotlib seaborn jupyter
+
+# Test instalacji
+python -c "
+import sklearn, pandas, numpy, matplotlib
+print('scikit-learn:', sklearn.__version__)
+print('pandas:', pandas.__version__)
+print('numpy:', numpy.__version__)
+print('Środowisko gotowe!')
+"
+```
+
+Oczekiwany output:
+```
+scikit-learn: 1.5.x
+pandas: 2.x.x
+numpy: 1.x.x / 2.x.x
+Środowisko gotowe!
+```
+
+**Rekomendacja:** Użyj **Jupyter Lab** lub **VS Code z Jupyter extension** - w tej chwili to standard dla eksperymentowania z modelami ML.
+
+```bash
+pip install jupyterlab
+jupyter lab  # otwiera przeglądarkę z notatnikiem
+```
+
+## Pierwsze demo: klasyfikacja w 10 liniach
+
+Najlepszy sposób żeby poczuć co ML robi - zobaczyć go w działaniu. Poniżej kompletny przykład klasyfikatora:
+
+```python
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score
+
+# 1. Dane: 150 próbek kwiatów irysów, 4 cechy, 3 klasy
+X, y = load_iris(return_X_y=True)
+
+# 2. Podział: 80% trening, 20% test
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
+
+# 3. Model: Random Forest (100 drzew decyzyjnych)
+model = RandomForestClassifier(n_estimators=100, random_state=42)
+
+# 4. Trening
+model.fit(X_train, y_train)
+
+# 5. Ewaluacja
+y_pred = model.predict(X_test)
+print(f"Accuracy: {accuracy_score(y_test, y_pred):.2%}")
+# Output: Accuracy: 100.00%  (lub 96.67% w zależności od random_state)
+```
+
+**Co się tutaj wydarzyło:**
+1. Załadowaliśmy klasyczny dataset Iris - 4 cechy kwiatu (długość/szerokość płatków i działek), 3 gatunki do rozróżnienia
+2. Podzieliliśmy dane - 120 przykładów do nauki, 30 do testu (sprawdzenie na danych niewidzianych podczas nauki)
+3. Wytrenowaliśmy Random Forest - 100 drzew decyzyjnych trenowanych na losowych podzbiorach danych, głosujących większościowo
+4. `model.fit()` - to moment gdzie "uczenie" się dzieje
+5. `model.predict()` na zbiorze testowym i miara accuracy
+
+W kolejnych lekcjach rozłożymy każdy z tych kroków na czynniki pierwsze.
+
+
+## Trzy pułapki, o których nikt nie mówi na początku
+
+### 1. Overfitting - "zapamiętanie" zamiast "uczenia"
+
+Model może osiągnąć 99% accuracy na danych treningowych i 60% na testowych. Oznacza to, że *zapamiętał* przykłady zamiast nauczyć się ogólnych wzorców. Analogia: student, który zapamiętał odpowiedzi do próbnych egzaminów, ale nie rozumie materiału.
+
+**Sygnał:** wysoka accuracy treningowa, niska testowa.
+**Remedium:** regularyzacja, więcej danych, prostszy model.
+
+### 2. Data leakage - "oszukiwanie" modelu
+
+Data leakage to sytuacja, gdy informacje z przyszłości "przeciekają" do danych treningowych. Przykład: chcesz przewidzieć czy klient odejdzie w tym miesiącu, ale przypadkowo dodajesz jako cechę "liczba kontaktów z obsługą klienta w miesiącu X+1". Model osiąga 99% accuracy - bo de facto widzi odpowiedź.
+
+**Sygnał:** zbyt dobry wynik na teście (np. 99% przy trudnym problemie).
+**Remedium:** pilnuj chronologii danych, podziel dane *przed* transformacją cech.
+
+### 3. Niezbalansowane klasy
+
+Masz dataset: 99% emaili to nie-spam, 1% to spam. Model który zawsze mówi "nie spam" osiąga 99% accuracy - i jest bezużyteczny. Dokładność (accuracy) to zła metryka gdy klasy są niezbalansowane.
+
+**Sygnał:** model zawsze przewiduje klasę dominującą.
+**Remedium:** F1-score, precision/recall zamiast accuracy. Oversampling (SMOTE) lub class weights.
+
+---
+
+## Podsumowanie lekcji
+
+W tej lekcji poznałeś:
+
+- Hierarchię pojęć: AI ⊃ ML ⊃ DL ⊃ LLM
+- Trzy paradygmaty uczenia: nadzorowane, nienadzorowane, przez wzmocnienie
+- Mechanizm trenowania: dane → parametry → funkcja straty → gradient descent → aktualizacja wag
+- Kluczowe biblioteki Pythona dla ML
+- Pierwsze demo klasyfikatora w scikit-learn
+- Trzy klasyczne pułapki: overfitting, data leakage, niezbalansowane klasy
+
+**Następna lekcja:** Matematyczne fundamenty ML - wektory, macierze i pochodne, które są naprawdę potrzebne (i nic ponad to).

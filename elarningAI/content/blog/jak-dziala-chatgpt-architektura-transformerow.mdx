@@ -1,0 +1,73 @@
+Kiedy po raz pierwszy przeczytałam paper "Attention Is All You Need" z 2017 roku, miałam wtedy wrażenie, że mi ktoś wyjął kawałek mózgu i wyczyścił. Trzy razy z rzędu to samo. Nie dlatego, że było trudne — bo język był zaskakująco prosty. Ale dlatego, że przez kilka lat studiowałam sieci rekurencyjne i LSTM jak coś oczywistego, a nagle okazało się, że cały ten fundament można wyrzucić. I nie tracisz nic. Zyskujesz wszystko.
+
+Transformer to jeden z tych pomysłów, gdzie trudno uwierzyć że nikt nie wpadł na to wcześniej. W sensie — mechanizm uwagi istniał. Ale pomysł, że to WYSTARCZY i nie potrzebujesz żadnej rekurencji? Niesamowicie odważny.
+
+## Problem z sieciami rekurencyjnymi
+
+Zanim powiem czym jest transformer, trzeba zrozumieć po co w ogóle był potrzebny.
+
+RNN i LSTM przetwarzały zdania sekwencyjnie — słowo po słowie. Brzmi logicznie, ale implikacje są okropne. Po pierwsze, zanikający gradient: im dłuższe zdanie, tym mniej sieć "pamiętała" co było na początku. Próbowałam kiedyś wytrenować LSTM na długich dokumentach prawniczych. Zaczęłam od czegoś, co działało świetnie na krótkich zdaniach. Przy paragrafach zaczęło się sypać. Przy rozdziałach — katastrofa. Model po prostu tracił wątek gdzieś po stu tokenach i nie było jak tego naprawić.
+
+Po drugie, brak równoległości. Każdy krok zależy od poprzedniego, więc nie możesz tego zrównoleglić. Na GPU, który ma tysiące rdzeni, przetwarzasz jedno słowo na raz. To jak kupić ferrari i jeździć w korku.
+
+Transformer rozwiązał oba problemy jednym mechanizmem.
+
+## Self-attention, czyli każde słowo patrzy na każde inne
+
+Wyobraź sobie zdanie: "Bank rzeki był wysoki, więc woda tam płynęła spokojnie."
+
+Słowo "tam" odnosi się do "banku rzeki". Ale skąd model ma wiedzieć, że chodzi o brzeg, nie o instytucję finansową? Przez kontekst. "Rzeki" zmienia znaczenie "banku". "Woda" potwierdza. W self-attention każde słowo jednocześnie "pyta" wszystkie inne: jesteś dla mnie ważny?
+
+Technicznie dzieje się to przez trzy wektory — Query (czego szukam?), Key (czym jestem dla innych?) i Value (co przekazuję?). Bierzesz Q i K, mnożysz skalarne, normalizujesz przez softmax żeby wagi sumowały się do jedynki, a potem ważona suma Value to to, co "widzi" dane słowo na końcu. Każde słowo dostaje inny mix wartości wszystkich innych słów, zależnie od tego jak bardzo zwróciło na nie uwagę.
+
+Co ważne: to dzieje się RÓWNOCZEŚNIE dla wszystkich słów. Nie sekwencyjnie. Stąd ta cudowna równoległość.
+
+## Multi-head: wiele perspektyw naraz
+
+Jeden mechanizm uwagi to za mało. W praktyce transformer używa kilku mechanizmów równolegle — różne "głowy" mogą się skupiać na różnych typach relacji. Jedna głowa śledzi, kto jest podmiotem zdania. Inna łapie anafory (co oznacza "on"?). Jeszcze inna — zależności semantyczne między odległymi częściami tekstu.
+
+GPT-4 ma prawdopodobnie setki głów w setkach warstw. Nikt z zewnątrz nie zna dokładnej architektury — OpenAI nie publikuje szczegółów od GPT-3.
+
+## Encoder, decoder — i dlaczego GPT używa tylko połowy
+
+Oryginalny transformer z 2017 roku miał dwa bloki.
+
+Encoder czytał całe wejście (np. polskie zdanie do tłumaczenia) i budował jego reprezentację. Decoder generował wyjście (angielskie tłumaczenie) słowo po słowie, patrząc zarówno na reprezentację encodera, jak i na to co już wygenerował.
+
+GPT używa tylko decodera. Powód jest prosty: generowanie tekstu to w zasadzie zgadywanie następnego tokenu na podstawie wszystkich poprzednich. Nie potrzebujesz "rozumieć" całości przed generowaniem. Generujesz, warunkując na całości historii, i to wystarczy. Plus decoder-only prostszy do skalowania.
+
+BERT używa tylko encodera — bo jego zadanie to rozumienie (klasyfikacja, NER, Q&A), nie generowanie.
+
+## Skąd model wie, że słowa mają kolejność?
+
+To mnie zaskoczyło gdy to zrozumiałam. Skoro przetwarzasz wszystkie tokeny równocześnie — skąd model wie, że "pies gryzie człowieka" to coś innego niż "człowiek gryzie psa"?
+
+Positional encoding. Do każdego tokenu dodawany jest dodatkowy wektor kodujący jego pozycję w sekwencji. Oryginalny paper używał sinusoidalnych funkcji (bo mają ładną własność — łatwo interpolują dla długości jakich model nie widział w treningu). Nowoczesne modele zazwyczaj uczą się tych pozycyjnych reprezentacji podczas treningu.
+
+Prosta, elegancka sztuczka.
+
+## Jak z tego wyszedł ChatGPT
+
+GPT to stos warstw decoder-only. W treningu model dostaje gigantyczne ilości tekstu i uczy się jednego: przewidywać następny token. Na podstawie wszystkiego co było wcześniej, jaki token powinien być dalej? To brzmi banalnie, ale skaluje się w sposób, który zaskoczyło całe środowisko.
+
+GPT-2 miał 1,5 miliarda parametrów i umiał pisać całkiem spójne teksty.
+GPT-3 miał 175 miliardów i nagle zaczął "rozumieć" instrukcje bez fine-tuningu.
+GPT-4 ma pewnie ~1–1,8 biliona parametrów (nikt oficjalnie nie potwierdził) i potrafi rozwiązywać zadania olimpijskie z matematyki.
+
+Skala robi ogromną różnicę. Ale nie tylko ilość parametrów — równie ważna jest jakość danych, RLHF (uczenie przez feedback człowieka) i architektoniczne optymalizacje jak Flash Attention.
+
+## Co to oznacza praktycznie dla Ciebie
+
+Kilka konkretnych konsekwencji tego co opisałam:
+
+Długość kontekstu kosztuje kwadratowo. Mechanizm uwagi oblicza relacje każdy-z-każdym, więc 2× dłuższy kontekst to 4× więcej obliczeń. Dlatego generowanie bardzo długich tekstów jest drogie, a "okno kontekstu" to nie ograniczenie przypadkowe — to koszt pamięci i compute.
+
+Tokenizacja wpływa na wyniki. Model operuje na tokenach (fragmentach słów), nie na słowach. Angielski to zazwyczaj ~4 znaki na token. Polski ma dłuższe słowa i bogatsza morfologia sprawia, że "wytransformuje" to może być 3–4 tokeny. Masz mniej "myślenia" na to samo zdanie.
+
+Temperature i top-p mają sens matematyczny. Temperature skaluje logity przed softmaxem — niska temperatura wyostrza rozkład (model jest bardziej zdecydowany), wysoka spłaszcza (bardziej losowy). Teraz wiesz czemu to ma takie efekty.
+
+Fine-tuning to nie "programowanie modelu". To matematyczna optymalizacja — przeliczeń dziesiątek miliardów parametrów w kierunku, który zmniejsza błąd na Twoich danych.
+
+---
+
+*Zbudować własny asystent AI na dokumentach firmowych? Opisuję architekturę RAG od podstaw do produkcji.*

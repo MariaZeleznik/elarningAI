@@ -1,0 +1,205 @@
+﻿---
+title: A/B Testing - jak projektować i analizować eksperymenty
+module: 8
+order: 8
+free: false
+duration: 55
+exercise:
+  prompt: "Oblicz minimalną wymaganą wielkość próby per grupę dla testu A/B: baseline_rate=0.05 (5% konwersji), minimum_detectable_effect=0.01 (1 punkt procentowy), alpha=0.05, power=0.80. Użyj statsmodels.stats.proportion.proportion_effectsize i zt_ind_solve_power."
+  expected: "from statsmodels.stats.proportion import proportion_effectsize\nfrom statsmodels.stats.power import zt_ind_solve_power\nbaseline = 0.05\ntarget = 0.06\neffect_size = proportion_effectsize(baseline, target)\nmin_n = zt_ind_solve_power(effect_size=effect_size, alpha=0.05, power=0.80, alternative='two-sided')\nprint(f'Min próba per grupa: {int(min_n)}')"
+  hint: "Użyj proportion_effectsize(p1, p2) do obliczenia effect size, następnie zt_ind_solve_power() do obliczenia n"
+  language: python
+---
+
+Mój największy błąd w A/B testowaniu? Uruchomiłam test w poniedziałek, we wtorek wieczór miałam p<0.05 i zatrzymałam test. Wdrożyłam nową wersję. Wyniki w produkcji były... takie same jak stara wersja. Nauczyłam się: "peek and stop" to droga do fałszywych wniosków.
+
+## Czym jest A/B test (i czym nie jest)
+
+A/B test to **randomizowany eksperyment kontrolowany**: losowo dzielisz użytkowników na dwie grupy, pokazujesz im różne wersje (A = kontrolna, B = wariant), mierzysz efekt.
+
+**Kluczowe słowo: randomizacja.** Bez randomizacji masz obserwację, nie eksperyment. Obserwacja → korelacja. Eksperyment → przyczynowość.
+
+Porównanie: "Użytkownicy którzy widzieli przycisk zielony kupowali więcej" (obserwacja, confounding) vs "Losowo pokazaliśmy 50% użytkowników zielony przycisk i zmierzyli zakupy" (eksperyment, kauzalność).
+
+## Projektowanie testu A/B
+
+### Krok 1: Hipoteza
+
+```
+H₀: Konwersja w wersji B = konwersja w wersji A
+H₁: Konwersja w wersji B ≠ konwersja w wersji A
+
+Metryka główna: konwersja (% użytkowników którzy kupili)
+Metryki guardrail: czas ładowania strony, bounce rate
+Zmieniamy: kolor/tekst przycisku CTA
+```
+
+### Krok 2: Oblicz wymaganą wielkość próby
+
+```python
+from statsmodels.stats.proportion import proportion_effectsize
+from statsmodels.stats.power import zt_ind_solve_power
+import numpy as np
+
+# Parametry
+baseline_rate = 0.032       # 3.2% obecna konwersja
+mde = 0.005                 # MDE: chcemy wykryć zmianę o +0.5pp (15% relative uplift)
+target_rate = baseline_rate + mde
+alpha = 0.05                # poziom istotności (typ I error)
+power = 0.80                # moc testu (1 - typ II error)
+
+# Oblicz minimalną próbę
+effect_size = proportion_effectsize(baseline_rate, target_rate)
+n_per_group = zt_ind_solve_power(
+    effect_size=effect_size,
+    alpha=alpha,
+    power=power,
+    alternative='two-sided'
+)
+
+n_per_group = int(np.ceil(n_per_group))
+print(f"MDE: +{mde:.1%} (konwersja {baseline_rate:.1%} → {target_rate:.1%})")
+print(f"Effect size (Cohen's h): {effect_size:.4f}")
+print(f"Minimalna próba per grupa: {n_per_group:,}")
+print(f"Łączna próba: {2*n_per_group:,}")
+
+# Przy 10 000 odwiedzin dziennie:
+daily_traffic = 10000
+days_needed = (2 * n_per_group) / daily_traffic
+print(f"\nSzacowany czas testu: {days_needed:.1f} dni")
+```
+
+**Dlaczego MDE ma znaczenie?** Im mniejszą różnicę chcesz wykryć, tym więcej próbek potrzebujesz. Test który ma wykryć +0.1pp wymaga 100x więcej próbek niż +1pp.
+
+### Krok 3: Implementacja randomizacji
+
+```python
+import hashlib
+
+def assign_variant(user_id: str, experiment_name: str, split: float = 0.5) -> str:
+    """
+    Deterministyczna randomizacja - ten sam user zawsze dostaje tę samą wersję.
+    """
+    salt = f"{experiment_name}:{user_id}"
+    hash_val = int(hashlib.md5(salt.encode()).hexdigest()[:8], 16)
+    normalized = hash_val / (16**8)  # 0.0 - 1.0
+    return "control" if normalized < split else "treatment"
+
+# Test: sprawdź rozkład
+import pandas as pd
+users = [f"user_{i}" for i in range(10000)]
+assignments = [assign_variant(u, "cta_color_test") for u in users]
+dist = pd.Series(assignments).value_counts(normalize=True)
+print(dist)  # control ~50%, treatment ~50%
+```
+
+### Krok 4: Analiza wyników
+
+```python
+import numpy as np
+from scipy import stats
+import pandas as pd
+
+# Symulacja wyników testu
+np.random.seed(42)
+n_control = 5247
+n_treatment = 5198
+
+# Symulacja: prawdziwa konwersja kontrola=3.2%, treatment=3.7% (efekt = 0.5pp)
+conv_control = np.random.binomial(1, 0.032, n_control)
+conv_treatment = np.random.binomial(1, 0.037, n_treatment)
+
+# Wyniki
+cr_control = conv_control.mean()
+cr_treatment = conv_treatment.mean()
+abs_lift = cr_treatment - cr_control
+rel_lift = abs_lift / cr_control
+
+print(f"Kontrola: {conv_control.sum():,} konwersji / {n_control:,} użytkowników = {cr_control:.2%}")
+print(f"Wariant: {conv_treatment.sum():,} konwersji / {n_treatment:,} użytkowników = {cr_treatment:.2%}")
+print(f"Absolutny uplift: +{abs_lift:.2%}")
+print(f"Relatywny uplift: +{rel_lift:.1%}")
+
+# Test statystyczny
+# Dla proporcji: test Z (chi-squared)
+from statsmodels.stats.proportion import proportions_ztest
+
+count = [conv_treatment.sum(), conv_control.sum()]
+nobs = [n_treatment, n_control]
+z_stat, p_value = proportions_ztest(count, nobs)
+
+print(f"\nZ-statystyka: {z_stat:.3f}")
+print(f"p-wartość: {p_value:.4f}")
+print(f"Wynik: {'ISTOTNY (p<0.05)' if p_value < 0.05 else 'NIEISTOTNY (p≥0.05)'}")
+
+# Przedział ufności dla uplift
+from statsmodels.stats.proportion import proportion_confint
+
+ci_control = proportion_confint(conv_control.sum(), n_control, alpha=0.05)
+ci_treatment = proportion_confint(conv_treatment.sum(), n_treatment, alpha=0.05)
+print(f"\n95% CI kontrola: [{ci_control[0]:.2%}, {ci_control[1]:.2%}]")
+print(f"95% CI wariant: [{ci_treatment[0]:.2%}, {ci_treatment[1]:.2%}]")
+```
+
+## Klasyczne błędy A/B testowania
+
+### 1. Peek and stop (p-hacking)
+
+```python
+import numpy as np
+from scipy import stats
+import matplotlib.pyplot as plt
+
+# Symulacja peek and stop: H₀ prawdziwa (brak efektu), ale sprawdzamy codziennie
+np.random.seed(42)
+false_positive_rate = 0  # ile razy błędnie odrzuciliśmy H₀?
+n_experiments = 1000
+
+for _ in range(n_experiments):
+    conv_a = np.random.binomial(1, 0.05, 1000)
+    conv_b = np.random.binomial(1, 0.05, 1000)  # ta sama konwersja!
+    
+    # Peek na różnych etapach
+    for checkpoint in [100, 200, 300, 500, 700, 1000]:
+        _, p = stats.chi2_contingency(pd.crosstab(
+            np.concatenate([conv_a[:checkpoint], conv_b[:checkpoint]]),
+            ['A']*checkpoint + ['B']*checkpoint
+        ))[:2]
+        if p < 0.05:
+            false_positive_rate += 1
+            break
+
+print(f"False positive rate przy peek & stop: {false_positive_rate/n_experiments:.1%}")
+# Wynik: ~20-30% zamiast oczekiwanych 5%!
+```
+
+### 2. Test za krótki (brak pełnego tygodnia)
+
+Zawsze testuj minimum 1-2 pełne tygodnie. Wzorce zakupów różnią się w tygodniu vs weekend.
+
+### 3. Wielokrotne metryki bez korekcji
+
+Jeśli testujesz 20 metryk z alpha=0.05, oczekujesz 1 fałszywie pozytywny wynik.
+
+```python
+# Korekcja Bonferroniego
+alpha = 0.05
+liczba_metryk = 20
+alpha_bonferroni = alpha / liczba_metryk
+print(f"Skorygowany alpha: {alpha_bonferroni:.4f}")
+```
+
+## Decyzja: kiedy wdrożyć?
+
+```
+Test zakończony → czy p < 0.05? → NIE → Brak dowodów na efekt
+                                → TAK → Czy uplift jest praktycznie ważny?
+                                        → NIE (np. +0.01%) → Nie wdrażaj mimo istotności
+                                        → TAK → Czy metryki guardrail OK?
+                                                 → NIE → Nie wdrażaj (efekt uboczny)
+                                                 → TAK → WDROŻENIE ✅
+```
+
+Pamiętaj: statystyczna istotność ≠ biznesowa wartość. +0.01% konwersji statystycznie istotne przy milionach użytkowników - ale czy warte wdrożenia i utrzymania nowej wersji?
+
+Następna lekcja: Data Storytelling - jak prezentować wyniki analiz tak, żeby były usłyszane.

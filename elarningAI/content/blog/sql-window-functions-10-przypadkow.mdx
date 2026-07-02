@@ -1,0 +1,246 @@
+Window functions to mój ulubiony dział SQL i jednocześnie temat, przy którym przez pierwsze 4 lata kariery robiłam unik. Wiedziałam że istnieją. Bałam się składni. Obchodziłam problemy przez subzapytania, które miały po 80 linii i działały 40 sekund. Kiedy w końcu usiadłam i naprawdę zrozumiałam window functions — poczułam się głupia. Że tak długo czekałam.
+
+Ten artykuł to nie tutorial "czym są window functions". To 10 scenariuszy z prawdziwych projektów, które rozwiązałam nimi — i które bez okienek byłyby koszmarem.
+
+Składnia w skrócie, żebyśmy byli na tej samej stronie:
+
+```sql
+funkcja() OVER (
+  PARTITION BY kolumna_grupująca   -- jak GROUP BY, ale wiersze zostają
+  ORDER BY kolumna_sortująca
+  ROWS BETWEEN ...                  -- opcjonalny zakres okna
+)
+```
+
+## Przypadek 1: Top N per kategoria
+
+Klasyk. Chcę 3 najlepiej sprzedające się produkty w każdej kategorii. Bez window functions: subzapytanie które dla każdej kategorii robi osobny ranking. Przy 50 kategoriach — boli.
+
+```sql
+WITH ranked AS (
+  SELECT 
+    category,
+    product_name,
+    total_sales,
+    DENSE_RANK() OVER (
+      PARTITION BY category 
+      ORDER BY total_sales DESC
+    ) AS rnk
+  FROM product_sales
+)
+SELECT * FROM ranked WHERE rnk <= 3;
+```
+
+Uwaga na wybór funkcji rankingowej. `ROW_NUMBER()` daje zawsze unikalne numery (arbitralne przy remisie). `RANK()` przy remisie daje tę samą pozycję, ale następna jest z luką (1, 1, 3). `DENSE_RANK()` bez luki (1, 1, 2). Dla klientów zwykle `DENSE_RANK()` jest intuicyjniejszy.
+
+## Przypadek 2: Narastające saldo
+
+Historia transakcji klienta — chcę saldo po każdej transakcji. Bez okienek: self-join lub subzapytanie dla każdego wiersza. Masakra w performance.
+
+```sql
+SELECT 
+  transaction_date,
+  customer_id,
+  amount,
+  SUM(amount) OVER (
+    PARTITION BY customer_id 
+    ORDER BY transaction_date
+    ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+  ) AS running_total
+FROM transactions;
+```
+
+`ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW` to "od początku do bieżącego wiersza". Domyślne zachowanie przy `ORDER BY` — możesz to pominąć i zazwyczaj dostaniesz to samo, ale lubię być explicite w produkcyjnym SQL.
+
+## Przypadek 3: Poprzednia wartość (LAG) i następna (LEAD)
+
+Masz dzienne przychody i chcesz zobaczyć zmianę relative do poprzedniego dnia. Albo identyfikujesz kiedy wartość "skoczyła" — anomaly detection w SQL.
+
+```sql
+SELECT 
+  date,
+  revenue,
+  LAG(revenue) OVER (ORDER BY date) AS prev_day_revenue,
+  revenue - LAG(revenue) OVER (ORDER BY date) AS daily_change,
+  ROUND(
+    (revenue - LAG(revenue) OVER (ORDER BY date)) 
+    / NULLIF(LAG(revenue) OVER (ORDER BY date), 0) * 100, 
+    1
+  ) AS pct_change
+FROM daily_revenue;
+```
+
+`NULLIF(..., 0)` żeby uniknąć dzielenia przez zero przy pierwszym wierszu. `LAG(revenue, 2)` dałoby wartość sprzed dwóch wierszy. Przydatne do porównań tydzień do tygodnia.
+
+## Przypadek 4: Średnia krocząca
+
+Wygładzanie szeregów czasowych. 7-dniowa średnia krocząca eliminuje szumy tygodniowe (weekendy vs powszednie).
+
+```sql
+SELECT 
+  date,
+  sales,
+  AVG(sales) OVER (
+    ORDER BY date
+    ROWS BETWEEN 6 PRECEDING AND CURRENT ROW
+  ) AS ma_7d
+FROM daily_sales;
+```
+
+`ROWS BETWEEN 6 PRECEDING AND CURRENT ROW` = bieżący wiersz + 6 poprzednich = 7 wierszy. Możesz też `RANGE BETWEEN INTERVAL '6' DAY PRECEDING AND CURRENT ROW` żeby działało na datach z lukami.
+
+## Przypadek 5: Pierwsza i ostatnia wartość w grupie
+
+Chcę dla każdej sesji użytkownika wiedzieć pierwszą i ostatnią stronę którą odwiedził.
+
+```sql
+SELECT 
+  session_id,
+  user_id,
+  page_url,
+  visited_at,
+  FIRST_VALUE(page_url) OVER (
+    PARTITION BY session_id 
+    ORDER BY visited_at
+  ) AS landing_page,
+  LAST_VALUE(page_url) OVER (
+    PARTITION BY session_id 
+    ORDER BY visited_at
+    ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+  ) AS exit_page
+FROM session_events;
+```
+
+Ważny szczegół: `LAST_VALUE` bez `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING` nie zadziała jak oczekujesz. Domyślne okno kończy się na bieżącym wierszu, więc `LAST_VALUE` zwróci wartość bieżącego wiersza, nie ostatniego. To klasyczny gotcha.
+
+## Przypadek 6: Identyfikacja sesji z przerwy
+
+Masz logi aktywności użytkownika i chcesz pogrupować w sesje: nowa sesja jeśli przerwa > 30 minut.
+
+```sql
+WITH gaps AS (
+  SELECT 
+    user_id,
+    event_time,
+    LAG(event_time) OVER (
+      PARTITION BY user_id ORDER BY event_time
+    ) AS prev_event_time,
+    CASE 
+      WHEN event_time - LAG(event_time) OVER (
+        PARTITION BY user_id ORDER BY event_time
+      ) > INTERVAL '30 minutes'
+      THEN 1 ELSE 0 
+    END AS new_session
+  FROM user_events
+),
+sessions AS (
+  SELECT 
+    *,
+    SUM(new_session) OVER (
+      PARTITION BY user_id ORDER BY event_time
+    ) AS session_id
+  FROM gaps
+)
+SELECT * FROM sessions;
+```
+
+`SUM(new_session)` jako okienko narastające liczy ile razy do tej pory "zresetowała się sesja" — to naturalny klucz sesji dla każdego użytkownika.
+
+## Przypadek 7: Percentyle i rozkłady
+
+Chcę zobaczyć ile zarabia każdy pracownik w stosunku do reszty departamentu.
+
+```sql
+SELECT 
+  name,
+  department,
+  salary,
+  PERCENT_RANK() OVER (
+    PARTITION BY department 
+    ORDER BY salary
+  ) AS percentile_in_dept,
+  NTILE(4) OVER (
+    PARTITION BY department 
+    ORDER BY salary
+  ) AS salary_quartile
+FROM employees;
+```
+
+`PERCENT_RANK()` zwraca wartość 0.0–1.0. `NTILE(4)` dzieli na 4 równe grupy (kwartyle). Często używam `NTILE(10)` dla decylów.
+
+## Przypadek 8: Year-over-year bez self-join
+
+Chcę miesięczną sprzedaż i zmianę rok do roku. Klasyczne podejście: self-join na miesiącu, minus rok. Nieczytelne. Z okienkami i LAG:
+
+```sql
+SELECT 
+  year,
+  month,
+  revenue,
+  LAG(revenue, 12) OVER (ORDER BY year, month) AS prev_year_revenue,
+  revenue - LAG(revenue, 12) OVER (ORDER BY year, month) AS yoy_change
+FROM monthly_revenue;
+```
+
+`LAG(revenue, 12)` — wartość 12 wierszy wcześniej (=rok wcześniej przy danych miesięcznych).
+
+## Przypadek 9: Identyfikacja duplikatów z zachowaniem "najnowszego"
+
+Klasyczne ETL zadanie: znajdź duplikaty i zostaw tylko najnowszy rekord.
+
+```sql
+WITH deduped AS (
+  SELECT *,
+    ROW_NUMBER() OVER (
+      PARTITION BY customer_id 
+      ORDER BY updated_at DESC
+    ) AS rn
+  FROM customers
+)
+DELETE FROM customers
+WHERE id IN (SELECT id FROM deduped WHERE rn > 1);
+```
+
+Albo wersja SELECT żeby sprawdzić co zostanie usunięte przed faktycznym DELETE.
+
+## Przypadek 10: Kohortowa retencja
+
+Chcę zobaczyć jaki % użytkowników z danego miesiąca rejestracji wraca w kolejnych miesiącach. Klasyczne zapytanie retencji kohortowej.
+
+```sql
+WITH cohorts AS (
+  SELECT 
+    user_id,
+    DATE_TRUNC('month', first_purchase_date) AS cohort_month
+  FROM users
+),
+user_activity AS (
+  SELECT 
+    c.user_id,
+    c.cohort_month,
+    DATE_TRUNC('month', p.purchase_date) AS activity_month,
+    DATEDIFF(
+      'month', 
+      c.cohort_month, 
+      DATE_TRUNC('month', p.purchase_date)
+    ) AS months_since_cohort
+  FROM cohorts c
+  JOIN purchases p ON c.user_id = p.user_id
+)
+SELECT 
+  cohort_month,
+  months_since_cohort,
+  COUNT(DISTINCT user_id) AS users,
+  COUNT(DISTINCT user_id) / FIRST_VALUE(COUNT(DISTINCT user_id)) OVER (
+    PARTITION BY cohort_month 
+    ORDER BY months_since_cohort
+  ) AS retention_rate
+FROM user_activity
+GROUP BY cohort_month, months_since_cohort;
+```
+
+`FIRST_VALUE` w okienku partycjonowanym po cohorcie daje liczbę z miesiąca 0 (startową), przez co dzielisz żeby dostać rate.
+
+---
+
+Tyle wystarczy. Opanuj te 10 wzorców i rozwiążesz 90% SQL zadań analitycznych, które wcześniej wymagały albo skomplikowanych subzapytań, albo przeniesienia logiki do Pythona. Window functions to jeden z tych miejsc, gdzie SQL jest naprawdę elegancki.

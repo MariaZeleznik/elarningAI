@@ -1,0 +1,200 @@
+﻿---
+title: Statystyka dla analityków - rozkłady, testy hipotez, p-wartości
+module: 5
+order: 5
+free: false
+duration: 60
+exercise:
+  prompt: "Używając scipy.stats, wykonaj test t-Studenta (ttest_ind) dla dwóch grup: grupa_A = [45, 52, 48, 61, 55, 49, 58, 50, 53, 47] i grupa_B = [38, 41, 36, 45, 39, 43, 40, 37, 42, 44]. Wydrukuj statystykę t i p-wartość."
+  expected: "from scipy import stats\ngrupa_A = [45, 52, 48, 61, 55, 49, 58, 50, 53, 47]\ngrupa_B = [38, 41, 36, 45, 39, 43, 40, 37, 42, 44]\nt_stat, p_value = stats.ttest_ind(grupa_A, grupa_B)\nprint(f't={t_stat:.3f}, p={p_value:.4f}')"
+  hint: "Użyj from scipy import stats, następnie stats.ttest_ind(a, b) które zwraca (statistic, pvalue)"
+  language: python
+---
+
+W statystyce zgubiłam się dwa razy: raz na studiach czytając definicje, i raz w pracy gdy nie rozumiałam po co w ogóle mam p-wartość. Dopiero trzecia próba - zaczynając od konkretnych pytań biznesowych - cokolwiek zaskoczyło. Tę wersję właśnie ci przekażę.
+
+## Dlaczego statystyka dla analityka danych?
+
+Bez statystyki Twoje wnioski są niebezpieczne. Przykłady z życia:
+
+- "Konwersja w grupie B wyniosła 3.2% vs 3.0% w A - B jest lepsze!" - ale czy to losowe wahanie czy realna różnica?
+- "Sprzedaż wzrosła 15% w grudniu" - oczywiste, bo grudzień. To sezonowość, nie poprawa.
+- "Klienci premium kupują 3x więcej" - ale oni są bogatsi, to konfunder.
+
+Statystyka daje narzędzia do odróżnienia sygnału od szumu.
+
+## Rozkłady - zrozum dane zanim je analizujesz
+
+```python
+import numpy as np
+import matplotlib.pyplot as plt
+from scipy import stats
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+
+# 1. Rozkład normalny - czas realizacji zamówień
+np.random.seed(42)
+czas_realizacji = np.random.normal(loc=48, scale=8, size=1000)  # śr=48h, sd=8h
+axes[0].hist(czas_realizacji, bins=30, density=True, alpha=0.7, color='steelblue')
+
+# Teoretyczna krzywa
+x = np.linspace(20, 80, 100)
+axes[0].plot(x, stats.norm.pdf(x, 48, 8), 'r-', linewidth=2)
+axes[0].set_title('Czas realizacji zamówień\n(rozkład normalny)')
+axes[0].set_xlabel('Godziny')
+axes[0].axvline(48, color='black', linestyle='--', label='Średnia: 48h')
+axes[0].legend()
+
+# 2. Rozkład log-normalny - wartości zamówień
+wartosci = np.random.lognormal(mean=5, sigma=0.8, size=1000)
+axes[1].hist(wartosci, bins=40, density=True, alpha=0.7, color='green')
+axes[1].axvline(np.median(wartosci), color='red', linestyle='--', label=f'Mediana: {np.median(wartosci):.0f} PLN')
+axes[1].axvline(np.mean(wartosci), color='blue', linestyle='--', label=f'Średnia: {np.mean(wartosci):.0f} PLN')
+axes[1].set_title('Wartości zamówień\n(rozkład log-normalny)')
+axes[1].set_xlabel('Wartość (PLN)')
+axes[1].legend()
+
+# 3. Rozkład Poissona - liczba zamówień per godzinę
+zamowienia_per_h = np.random.poisson(lam=12, size=500)  # średnio 12/h
+axes[2].hist(zamowienia_per_h, bins=15, density=True, alpha=0.7, color='orange', rwidth=0.85)
+axes[2].set_title('Zamówienia per godzinę\n(rozkład Poissona, λ=12)')
+axes[2].set_xlabel('Liczba zamówień')
+
+plt.tight_layout()
+plt.show()
+
+print("Ważna obserwacja dla wartości zamówień:")
+print(f"  Średnia: {np.mean(wartosci):.0f} PLN")
+print(f"  Mediana: {np.median(wartosci):.0f} PLN")
+print(f"  Różnica: {(np.mean(wartosci) - np.median(wartosci))/np.median(wartosci):.0%} - outliersy zawyżają średnią")
+```
+
+## Testy hipotez - jak formalnie zadać pytanie danych
+
+### Framework testowania hipotez
+
+```
+H₀ (hipoteza zerowa): "Nie ma różnicy" / "Efekt = 0"
+H₁ (hipoteza alternatywna): "Istnieje różnica" / "Efekt ≠ 0"
+
+Test statystyczny:
+  → Oblicz statystykę testową (t, χ², F, z, ...)
+  → Oblicz p-wartość (prawdopodobieństwo obserwacji
+    przy założeniu że H₀ prawdziwa)
+  
+Decyzja (α = 0.05 standardowy próg):
+  p < 0.05 → odrzucamy H₀ (wynik "statystycznie istotny")
+  p ≥ 0.05 → brak dowodów do odrzucenia H₀
+```
+
+### Test t-Studenta - porównanie dwóch grup
+
+```python
+from scipy import stats
+import numpy as np
+
+np.random.seed(42)
+# Czas ładowania strony przed i po optymalizacji
+przed = np.random.normal(loc=3.2, scale=0.8, size=50)  # średnio 3.2s
+po = np.random.normal(loc=2.9, scale=0.7, size=50)     # średnio 2.9s
+
+print(f"Przed: {przed.mean():.3f}s ± {przed.std():.3f}s")
+print(f"Po: {po.mean():.3f}s ± {po.std():.3f}s")
+print(f"Różnica: {(przed.mean() - po.mean()):.3f}s ({(przed.mean() - po.mean())/przed.mean():.1%})")
+
+# Test t (niezależne próby)
+t_stat, p_value = stats.ttest_ind(przed, po)
+print(f"\nt-statystyka: {t_stat:.4f}")
+print(f"p-wartość: {p_value:.4f}")
+
+alpha = 0.05
+if p_value < alpha:
+    print(f"✅ Odrzucamy H₀: różnica ISTOTNA statystycznie (p={p_value:.4f} < α={alpha})")
+else:
+    print(f"❌ Brak podstaw do odrzucenia H₀: różnica NIEISTOTNA (p={p_value:.4f} ≥ α={alpha})")
+
+# Przedział ufności dla różnicy
+diff = przed.mean() - po.mean()
+se = np.sqrt(przed.var()/len(przed) + po.var()/len(po))
+ci = stats.t.ppf([0.025, 0.975], df=len(przed)+len(po)-2) * se
+print(f"\n95% CI dla różnicy: [{diff+ci[0]:.3f}s, {diff+ci[1]:.3f}s]")
+```
+
+### Chi-squared test - zmienne kategoryczne
+
+```python
+# Czy konwersja różni się między wersjami strony?
+import numpy as np
+from scipy.stats import chi2_contingency
+
+# Contingency table: [wersja A, wersja B] × [konwersja, brak konwersji]
+dane = np.array([
+    [142, 858],   # Wersja A: 142 konwersji, 858 bez
+    [168, 832],   # Wersja B: 168 konwersji, 832 bez
+])
+
+print("Wersja A:", dane[0][0]/(dane[0][0]+dane[0][1]):.1%}, "konwersji")
+print(f"Wersja B: {dane[1][0]/(dane[1][0]+dane[1][1]):.1%} konwersji")
+
+chi2, p_value, dof, expected = chi2_contingency(dane)
+print(f"\nchi² = {chi2:.3f}, df = {dof}, p = {p_value:.4f}")
+
+if p_value < 0.05:
+    print("✅ Różnica konwersji jest istotna statystycznie")
+else:
+    print("❌ Różnica konwersji może być przypadkowa")
+```
+
+## Typowe błędy statystyczne
+
+```python
+# BŁĄD 1: Peek and stop - sprawdzasz p-value codziennie i zatrzymujesz gdy < 0.05
+# Problem: wielokrotne sprawdzanie znacznie zawyża typ I error (fałszywe pozytywy)
+
+# BŁĄD 2: Ignorowanie effect size - mała p-wartość ≠ praktyczna ważność
+# Przelicz na cohens d lub relative uplift
+
+def cohens_d(group1, group2):
+    """Effect size: jak duża praktycznie jest różnica?"""
+    pooled_std = np.sqrt((group1.std()**2 + group2.std()**2) / 2)
+    return (group1.mean() - group2.mean()) / pooled_std
+
+d = cohens_d(przed, po)
+print(f"Cohen's d = {abs(d):.2f}")
+interpretacja = 'mały' if abs(d) < 0.5 else 'średni' if abs(d) < 0.8 else 'duży'
+print(f"Efekt: {interpretacja}")
+
+# BŁĄD 3: Confounding - "korelacja = przyczynowość"
+# Przykład: regiony z więcej kawiarni mają wyższy wskaźnik szczęścia
+# Confounder: poziom zamożności regionu → więcej kawiarni + wyższe szczęście
+```
+
+## Analiza korelacji
+
+```python
+import pandas as pd
+import seaborn as sns
+
+np.random.seed(42)
+n = 200
+df = pd.DataFrame({
+    'temperatura': np.random.normal(20, 5, n),
+    'sprzedaz_napojow': None,
+    'liczba_klientow': np.random.normal(150, 30, n),
+    'sprzedaz_ogrzewania': None,
+})
+df['sprzedaz_napojow'] = 10 * df['temperatura'] + 50 + np.random.normal(0, 20, n)
+df['sprzedaz_ogrzewania'] = -8 * df['temperatura'] + 400 + np.random.normal(0, 30, n)
+
+corr = df.corr()
+print(corr)
+
+sns.heatmap(corr, annot=True, cmap='RdBu_r', center=0, fmt='.2f', square=True)
+plt.title('Macierz korelacji Pearsona')
+plt.tight_layout()
+plt.show()
+```
+
+**Pamiętaj:** korelacja Pearsona mierzy tylko zależności liniowe. Dane mogą być silnie skorelowane nieliniowo i dać r=0.
+
+Następna lekcja: Power BI - tworzenie profesjonalnych dashboardów bez kodu.

@@ -1,0 +1,173 @@
+﻿---
+title: Wizualizacja danych - Matplotlib, Seaborn i Plotly
+module: 4
+order: 4
+free: false
+duration: 55
+exercise:
+  prompt: "Używając matplotlib, stwórz wykres słupkowy (bar chart) dla danych: kategorie = ['A', 'B', 'C', 'D'], wartości = [23, 45, 12, 67]. Ustaw tytuł 'Sprzedaż per kategoria'. Wydrukuj plt.show()."
+  expected: "import matplotlib.pyplot as plt\nkategorie = ['A', 'B', 'C', 'D']\nwartosci = [23, 45, 12, 67]\nplt.bar(kategorie, wartosci)\nplt.title('Sprzedaż per kategoria')\nplt.show()"
+  hint: "Użyj plt.bar(x, y), następnie plt.title() i plt.show()"
+  language: python
+---
+
+Mój pierwszy raport dla klienta był arkuszem Excela z kolorowymi tabelami i liczbami. Klient powiedział "aha" i odłożył na stos. Drugi raport miał trzy wykresy i jedno zdanie wniosku. Klient powiedział "to wysyłamy do zarządu". Nauczyłam się wtedy czegoś ważnego: mózg ludzki przetwarza obraz 60 000 razy szybciej niż tekst.
+
+## Zasady wizualizacji zanim zaczniesz
+
+Narzędzie (Matplotlib, Plotly) to ostatni wybór. Pierwsze pytania:
+1. Co chcę *pokazać*? (trend, rozkład, porównanie, zależność, skład)
+2. Dla kogo? (analityk = szczegóły, zarząd = jeden wniosek)
+3. Ile kategorii? (<7 kolorów dla czytelności)
+
+| Pytanie | Właściwy wykres |
+|---------|----------------|
+| Jak zmienia się w czasie? | Liniowy (line chart) |
+| Porównanie kategorii | Słupkowy (bar chart) |
+| Proporcje całości | Kołowy (pie) - tylko gdy < 5 segmentów |
+| Rozkład jednej zmiennej | Histogram, boxplot |
+| Zależność X vs Y | Scatter plot |
+| Macierz korelacji | Heatmap |
+
+## Matplotlib - podstawy
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+# Styl profesjonalny
+plt.style.use('seaborn-v0_8-whitegrid')
+
+fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+fig.suptitle('Przegląd sprzedaży Q1 2025', fontsize=16, fontweight='bold')
+
+# 1. Trend sprzedaży (line chart)
+miesiace = ['Styczeń', 'Luty', 'Marzec']
+sprzedaz = [142000, 156000, 178000]
+poprzedni_rok = [128000, 141000, 153000]
+
+axes[0,0].plot(miesiace, sprzedaz, 'b-o', linewidth=2, label='2025', markersize=8)
+axes[0,0].plot(miesiace, poprzedni_rok, 'r--o', linewidth=2, label='2024', markersize=8, alpha=0.7)
+axes[0,0].set_title('Trend sprzedaży')
+axes[0,0].set_ylabel('Przychód (PLN)')
+axes[0,0].legend()
+axes[0,0].yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x/1000:.0f}k'))
+
+# 2. Sprzedaż per kategoria (horizontal bar - lepsza gdy długie nazwy)
+kategorie = ['Elektronika', 'Odzież', 'Sport', 'Dom i ogród', 'Zabawki']
+wartosci = [487000, 234000, 198000, 156000, 89000]
+colors = ['#2196F3' if v == max(wartosci) else '#90CAF9' for v in wartosci]
+
+bars = axes[0,1].barh(kategorie, wartosci, color=colors)
+axes[0,1].set_title('Sprzedaż per kategoria')
+axes[0,1].set_xlabel('Przychód (PLN)')
+# Dodaj etykiety wartości
+for bar in bars:
+    w = bar.get_width()
+    axes[0,1].text(w + 5000, bar.get_y() + bar.get_height()/2, 
+                   f'{w/1000:.0f}k', va='center', fontsize=9)
+
+# 3. Rozkład zamówień (histogram)
+np.random.seed(42)
+zamowienia = np.random.lognormal(mean=5, sigma=0.5, size=1000)
+axes[1,0].hist(zamowienia, bins=30, color='#4CAF50', edgecolor='white', alpha=0.8)
+axes[1,0].axvline(np.median(zamowienia), color='red', linestyle='--', label=f'Mediana: {np.median(zamowienia):.0f} PLN')
+axes[1,0].set_title('Rozkład wartości zamówień')
+axes[1,0].set_xlabel('Wartość zamówienia (PLN)')
+axes[1,0].legend()
+
+# 4. Scatter: przychód vs liczba zamówień per klient
+np.random.seed(42)
+n = 100
+zamowienia_per_klient = np.random.randint(1, 50, n)
+przychod_per_klient = zamowienia_per_klient * 150 + np.random.normal(0, 500, n)
+kategoria_klienta = np.random.choice(['Gold', 'Silver', 'Basic'], n)
+
+colors_map = {'Gold': '#FFC107', 'Silver': '#9E9E9E', 'Basic': '#2196F3'}
+for kat in ['Gold', 'Silver', 'Basic']:
+    mask = kategoria_klienta == kat
+    axes[1,1].scatter(zamowienia_per_klient[mask], przychod_per_klient[mask],
+                      c=colors_map[kat], label=kat, alpha=0.7)
+axes[1,1].set_title('Klienci: liczba zamówień vs przychód')
+axes[1,1].set_xlabel('Liczba zamówień')
+axes[1,1].set_ylabel('Całkowity przychód (PLN)')
+axes[1,1].legend()
+
+plt.tight_layout()
+plt.savefig('dashboard_q1.png', dpi=150, bbox_inches='tight')
+plt.show()
+```
+
+## Seaborn - statystyczne wykresy w jednej linii
+
+```python
+import seaborn as sns
+import pandas as pd
+
+# Generuj dane
+np.random.seed(42)
+df = pd.DataFrame({
+    'dzien_tygodnia': np.tile(['Pon','Wt','Śr','Czw','Pt','Sob','Nd'], 100),
+    'kanal': np.random.choice(['Web', 'Mobilna', 'Sklep'], 700),
+    'sprzedaz': np.random.lognormal(6, 0.8, 700),
+    'region': np.random.choice(['Północ', 'Południe', 'Centrum'], 700),
+})
+
+fig, axes = plt.subplots(1, 3, figsize=(16, 5))
+
+# Boxplot - rozkład sprzedaży per kanał
+sns.boxplot(data=df, x='kanal', y='sprzedaz', ax=axes[0], palette='Set2')
+axes[0].set_title('Rozkład sprzedaży per kanał')
+axes[0].set_yscale('log')
+
+# Heatmap - korelacja
+numeric_data = df[['sprzedaz']].assign(
+    dzien_num=pd.Categorical(df['dzien_tygodnia']).codes,
+    kanal_num=pd.Categorical(df['kanal']).codes,
+    region_num=pd.Categorical(df['region']).codes,
+)
+corr = numeric_data.corr()
+sns.heatmap(corr, annot=True, cmap='coolwarm', center=0, ax=axes[1], fmt='.2f')
+axes[1].set_title('Macierz korelacji')
+
+# Violin plot - rozkład per region
+sns.violinplot(data=df, x='region', y='sprzedaz', ax=axes[2], palette='muted')
+axes[2].set_title('Rozkład sprzedaży per region')
+axes[2].set_yscale('log')
+
+plt.tight_layout()
+plt.show()
+```
+
+## Plotly - interaktywne wykresy
+
+```python
+import plotly.express as px
+import plotly.graph_objects as go
+
+# Prosty interaktywny line chart
+fig = px.line(
+    df.groupby('dzien_tygodnia')['sprzedaz'].mean().reset_index(),
+    x='dzien_tygodnia',
+    y='sprzedaz',
+    title='Średnia sprzedaż per dzień tygodnia',
+    labels={'sprzedaz': 'Średnia sprzedaż (PLN)', 'dzien_tygodnia': 'Dzień'},
+    markers=True,
+)
+fig.update_layout(hovermode='x unified')
+fig.show()  # Otwiera w przeglądarce z zoom, tooltips, download
+
+# Mapę polskich województw (choropleth)
+# wymaga danych GeoJSON - przykład konceptualny:
+# fig = px.choropleth(df_woj, geojson=polska_geojson, locations='województwo', ...)
+```
+
+## Zasady dobrego wykresu (do zapamiętania)
+
+1. **Jeden wykres = jeden wniosek** - tytuł to wniosek, nie opis ("Sprzedaż elektroniki rośnie o 23% rok do roku", nie "Wykres sprzedaży elektroniki")
+2. **Mniej = więcej** - usuń gridlines, borders, legendy kiedy nie potrzebne
+3. **Koloruj ze znaczeniem** - highlight jednej kategorii zamiast tęczy kolorów
+4. **Oś Y zaczyna od 0** (dla bar chart) - ucięta oś Y to częsty manipulator
+5. **Rozmiar markera/słupka = percepcja** - uważaj na wykres kołowy z 10 kawałkami
+
+Następna lekcja: Statystyka dla analityków - rozkłady, testy hipotez i A/B testing.

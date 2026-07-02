@@ -1,0 +1,330 @@
+﻿---
+title: Podstawy analizy danych - myślenie analityczne
+module: 1
+order: 1
+free: true
+duration: 40
+exercise:
+  prompt: "Napisz zapytanie SQL, które zlicza liczbę rekordów w tabeli 'zamowienia' i zwraca wynik w kolumnie o nazwie 'liczba_zamowien'."
+  expected: "SELECT COUNT(*) AS liczba_zamowien FROM zamowienia;"
+  hint: "Użyj funkcji COUNT(*) z aliasem AS i podaj nazwę tabeli po FROM"
+  language: sql
+---
+
+Kiedy zaczynałem pracę z danymi, wylądowałem przy projekcie z raportem w Excelu z 47 zakładkami. Wiedziałem jak obsługiwać Excela. Ale przez 3 dni nie wiedziałem co zrobić, żeby ten raport był *przydatny*. Problem nie był w narzędziu - problem był w tym, że nikt nie powiedział mi co właściwie chcę odpowiedzieć.
+
+To jest najważniejsza lekcja, której nigdy nie ma w tutorialach: **analityka danych zaczyna się od pytania, nie od danych**.
+
+## Czym naprawdę jest analityka danych?
+
+Analityka danych to nie Excel, SQL ani Python. To dyscyplina odpowiadania na pytania za pomocą dowodów - gdzie dowodami są dane.
+
+Surowe dane to jak zeznania świadków: dużo szczegółów, potencjalnie sprzecznych, wymagających interpretacji. Zadaniem analityka jest wyciągnąć z nich *wiarygodne wnioski*, które pomogą podjąć lepszą decyzję.
+
+**Ilustracja różnicy:**
+
+Analityk otrzymuje prośbę: *"Wyciągnij mi sprzedaż za kwiecień."*
+
+**Podejście złe (raportowanie):**
+> Sprzedaż w kwietniu: 1 247 300 PLN
+
+**Podejście dobre (analityka):**
+> Sprzedaż w kwietniu: 1 247 300 PLN - o 8,3% poniżej celu (1 360 000 PLN) i o 12,1% poniżej kwietnia poprzedniego roku. Największy spadek: kategoria Elektronika (-23%), podczas gdy Odzież +14%. Trzy największe rynki zbytu zachowały się normalnie, natomiast rynek warszawski odpowiada za 70% odchylenia od celu.
+
+Oba wymagają tej samej bazy danych. Różni je pytanie, które analityk postawił sobie *zanim* otworzył SQL.
+
+## Typy analityki - od opisu do przewidywania
+
+W branży wyróżnia się cztery typy analityki, rosnące w złożoności:
+
+| Typ | Pytanie | Przykład | Narzędzia |
+|-----|---------|---------|-----------|
+| **Opisowa** | Co się stało? | "Ile sprzedaliśmy w marcu?" | SQL, Excel, dashboardy |
+| **Diagnostyczna** | Dlaczego się stało? | "Dlaczego sprzedaż w marcu spadła?" | SQL + pivot, segmentacja |
+| **Predykcyjna** | Co się stanie? | "Ile sprzedamy w Q2?" | Regresja, forecasting |
+| **Preskryptywna** | Co zrobić? | "Jak zmienić cenę, żeby zmaksymalizować marżę?" | Optymalizacja, A/B testy |
+
+Większość firm jest na etapie opisowej → diagnostycznej. Predykcyjna jest celem. Preskryptywna - rzadkością.
+
+W tym kursie przejdziemy wszystkie cztery poziomy: od prostych zapytań SQL do modeli predykcyjnych w Pythonie.
+
+## Rodzaje danych i ich właściwości
+
+### Dane strukturyzowane
+
+Zorganizowane w wiersze i kolumny - relacyjne bazy danych, pliki CSV, arkusze kalkulacyjne. Najłatwiejsze do analizy.
+
+```
+order_id | customer_id | product     | quantity | price  | order_date
+---------|-------------|-------------|----------|--------|------------
+1001     | C-441       | Laptop Dell | 1        | 3499   | 2025-03-15
+1002     | C-219       | Myszka USB  | 3        | 89     | 2025-03-15
+1003     | C-441       | Słuchawki   | 1        | 449    | 2025-03-16
+```
+
+### Dane niestrukturyzowane
+
+Tekst (opinie klientów, maile, artykuły), obrazy, audio, wideo. Stanowią ~80% danych w organizacjach. Wymagają przetworzenia wstępnego - NLP, computer vision - zanim można je analizować w tabelach.
+
+### Dane semi-strukturyzowane
+
+JSON z API, XML, logi systemowe - mają strukturę, ale elastyczną. Przykład logu z serwisu:
+
+```json
+{
+  "timestamp": "2025-03-15T14:32:11Z",
+  "user_id": "C-441",
+  "event": "product_view",
+  "properties": {
+    "product_id": "P-1089",
+    "category": "laptopy",
+    "source": "search",
+    "session_id": "s_9f2ab"
+  }
+}
+```
+
+Taki log wymaga "spłaszczenia" do tabeli zanim trafi do SQL.
+
+## Typy zmiennych - klucz do właściwej analizy
+
+Nie wszystkie dane są równe. Wybór metody analizy i wizualizacji zależy od tego *jakiego rodzaju* dane masz.
+
+### Ilościowe (numeryczne)
+
+Liczby, na których ma sens wykonywać operacje matematyczne:
+
+- **Ciągłe:** przychód (3499,99 PLN), temperatura, czas sesji - mogą przyjąć dowolną wartość w zakresie
+- **Dyskretne:** liczba zamówień (1, 2, 3...), liczba klientów - tylko liczby całkowite
+
+### Jakościowe (kategoryczne)
+
+- **Nominalne** (bez porządku): płeć, kategoria produktu, miasto - wartości nie mają naturalnego porządku
+- **Porządkowe** (z porządkiem): ocena satysfakcji (1–5 gwiazdek), rozmiar (S/M/L/XL) - wartości mają naturalne szeregowanie
+
+**Dlaczego to ważne?** Na zmiennej nominalnej nie obliczysz "średniej kategorii produktu" - to nonsens. Na porządkowej "średnia oceny gwiazdkowej" jest sensowna tylko przy założeniach dotyczących odległości między stopniami.
+
+```sql
+-- Przykład błędu: "średnia" na zmiennej nominalnej
+SELECT AVG(płeć) FROM klienci  -- nonsens: AVG('M', 'K', 'M') = ?
+
+-- Prawidłowo: COUNT / proportion
+SELECT płeć, COUNT(*) as liczba, COUNT(*) * 100.0 / SUM(COUNT(*)) OVER() as procent
+FROM klienci
+GROUP BY płeć
+```
+
+## Cykl życia projektu analitycznego
+
+Każdy projekt analityczny - od prostego raportu do budowy modelu ML - przechodzi przez te same etapy:
+
+```
+1. Zrozumienie problemu biznesowego
+         │
+         ▼
+2. Zbieranie danych
+   (SQL, API, pliki CSV, web scraping)
+         │
+         ▼
+3. Eksploracja (EDA)
+   (rozkłady, wartości odstające, korelacje, braki)
+         │
+         ▼
+4. Czyszczenie i transformacja
+   (deduplikacja, imputacja braków, feature engineering)
+         │
+         ▼
+5. Analiza / Modelowanie
+   (statystyki, SQL, pandas, ML)
+         │
+         ▼
+6. Komunikacja wyników
+   (raport, dashboard, prezentacja)
+         │
+         ▼
+7. Działanie i monitoring
+   (wdrożenie, śledzenie efektów)
+```
+
+Etap 3 (EDA) pochłania zwykle 50–70% czasu projektu. Doświadczeni analitycy poświęcają na niego proporcjonalnie więcej czasu niż juniorzy - bo dobre zrozumienie danych uniemożliwia późniejsze błędy.
+
+## Eksploracyjna analiza danych (EDA) - co sprawdzasz jako pierwsze
+
+Przed jakąkolwiek analizą odpowiedz na te pytania:
+
+### 1. Jaki jest kształt danych?
+
+```python
+import pandas as pd
+
+df = pd.read_csv('sales_data.csv')
+
+print(df.shape)        # (87432, 15) - 87 tys. wierszy, 15 kolumn
+print(df.dtypes)       # typy kolumn
+print(df.head())       # pierwsze 5 wierszy
+print(df.tail())       # ostatnie 5 - czy dane się "ucinają"?
+```
+
+### 2. Czy są braki danych?
+
+```python
+# Procent braków per kolumna
+missing = df.isnull().mean().sort_values(ascending=False)
+print(missing[missing > 0])
+
+# Przykładowy output:
+# customer_email     0.34   ← 34% braków! Decyzja: usunąć kolumnę czy imputować?
+# shipping_address   0.08
+# product_weight     0.02
+```
+
+**Reguła praktyczna:** > 50% braków w kolumnie → zwykle usuń kolumnę. 5–20% → imputacja lub analiza wzorca braków (MCAR/MAR/MNAR).
+
+### 3. Jaki jest rozkład kluczowych zmiennych?
+
+```python
+# Statystyki opisowe
+print(df['revenue'].describe())
+# count   87432.000
+# mean      347.23     ← średnia
+# std       812.45     ← duże odchylenie - podejrzenie skośności
+# min         0.10
+# 25%        45.00     ← Q1
+# 50%       156.00     ← mediana: znacznie niżej od średniej!
+# 75%       389.00     ← Q3
+# max     48000.00     ← outlier?
+
+# Mediana << Średnia → rozkład prawostronnie skośny (outliersy z góry)
+# Typowe dla przychodów, wartości zamówień
+```
+
+### 4. Czy są wartości odstające (outliery)?
+
+```python
+# Metoda IQR
+Q1 = df['revenue'].quantile(0.25)
+Q3 = df['revenue'].quantile(0.75)
+IQR = Q3 - Q1
+
+dolna_granica = Q1 - 1.5 * IQR
+górna_granica = Q3 + 1.5 * IQR
+
+outliery = df[(df['revenue'] < dolna_granica) | (df['revenue'] > górna_granica)]
+print(f"Liczba outlierów: {len(outliery)} ({len(outliery)/len(df):.1%})")
+
+# Ważne: outlier to nie zawsze błąd!
+# Zamówienie za 48 000 PLN może być prawdziwą transakcją B2B
+# Przed usunięciem: zrozum biznesowy kontekst
+```
+
+### 5. Czy są duplikaty?
+
+```python
+# Duplikaty wierszy
+print(f"Duplikaty: {df.duplicated().sum()}")
+
+# Duplikaty na kluczu biznesowym (np. nie może być dwóch zamówień o tym samym ID)
+print(f"Duplikaty order_id: {df['order_id'].duplicated().sum()}")
+
+# Usunięcie duplikatów
+df_clean = df.drop_duplicates(subset=['order_id'], keep='last')
+```
+
+## Pierwsze zapytanie analityczne: od pytania do SQL
+
+Przetestujmy schemat "pytanie → dane → wniosek":
+
+**Pytanie biznesowe:** Które kategorie produktów odpowiadają za 80% przychodu? (Analiza Pareto)
+
+```sql
+WITH revenue_by_category AS (
+    SELECT 
+        category,
+        SUM(order_total) AS revenue,
+        COUNT(DISTINCT order_id) AS orders
+    FROM orders
+    WHERE order_status = 'completed'
+      AND order_date >= '2025-01-01'
+    GROUP BY category
+),
+ranked AS (
+    SELECT
+        category,
+        revenue,
+        orders,
+        revenue * 100.0 / SUM(revenue) OVER () AS pct_of_total,
+        SUM(revenue) OVER (ORDER BY revenue DESC) * 100.0 
+            / SUM(revenue) OVER () AS cumulative_pct
+    FROM revenue_by_category
+)
+SELECT * FROM ranked
+ORDER BY revenue DESC;
+```
+
+**Oczekiwany wynik:**
+
+| category | revenue | pct_of_total | cumulative_pct |
+|----------|---------|-------------|----------------|
+| Elektronika | 487 230 | 39.1% | 39.1% |
+| RTV/AGD | 298 450 | 23.9% | 63.0% |
+| Komputery | 154 880 | 12.4% | 75.4% |
+| Telefony | 86 200 | 6.9% | 82.3% |
+| Sport | 71 100 | 5.7% | 88.0% |
+
+**Wniosek:** 4 kategorie (z 12 łącznie) odpowiadają za 82% przychodu. Zasada Pareto sprawdza się. To informacja dla działu zakupów i marketingu.
+
+## Narzędzia i kiedy po nie sięgać
+
+Często pytanie brzmi: "Czy powinienem używać Excela, SQL czy Pythona?" Odpowiedź zależy od kontekstu:
+
+| Sytuacja | Narzędzie | Dlaczego |
+|----------|-----------|----------|
+| < 100 000 wierszy, jednorazowa analiza | Excel / Google Sheets | Szybko, wizualnie, udostępnialne |
+| Dane w relacyjnej bazie | SQL (pierwszy wybór) | Dane są tam gdzie żyją, wydajne |
+| > 1 mln wierszy | SQL lub Python/pandas | Excel nie wytrzyma |
+| Automatyzacja powtarzalnych raportów | Python | Skrypt odpalany cyklicznie |
+| Zaawansowana statystyka, ML | Python (pandas, scipy, sklearn) | Biblioteki bez alternatywy |
+| Dashboard dla zarządu | Power BI / Tableau | Interaktywna wizualizacja |
+
+**Moja heurystyka:** zacznij od SQL. Jeśli SQL nie wystarczy - przejdź do Pythona. Jeśli wynik trzeba opublikować wizualnie - Power BI lub eksport do Excela.
+
+## Ćwiczenie: EDA na realnym datasecie
+
+Pobierz dataset sprzedaży e-commerce (Google: "E-commerce dataset CSV Kaggle") i odpowiedz na pytania:
+
+1. Ile wierszy i kolumn ma dataset? Jakie są typy zmiennych?
+2. Która kolumna ma najwięcej brakujących wartości?
+3. Jaki jest rozkład zamówień wg dnia tygodnia? (historgram)
+4. Który kraj ma największy średni koszyk zakupowy?
+5. Czy są zamówienia z ujemną wartością? Jeśli tak - co to może oznaczać?
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+
+df = pd.read_csv('ecommerce_data.csv')
+
+# Twój kod tutaj...
+# Wskazówki:
+# - df.info() dla przeglądu
+# - df['order_date'] = pd.to_datetime(df['order_date'])  ← konwersja daty
+# - df['day_of_week'] = df['order_date'].dt.day_name()
+# - df.groupby('country')['order_value'].mean().sort_values(ascending=False)
+```
+
+---
+
+
+## Podsumowanie lekcji
+
+W tej lekcji poznałeś:
+
+- **Definicję analityki** - odpowiadanie na pytania za pomocą danych, nie samo "liczenie"
+- **Cztery typy**: opisowa → diagnostyczna → predykcyjna → preskryptywna
+- **Rodzaje danych**: strukturyzowane, semi-strukturyzowane, niestrukturyzowane
+- **Typy zmiennych**: ilościowe (ciągłe/dyskretne), jakościowe (nominalne/porządkowe)
+- **Cykl projektu analitycznego**: 7 etapów, EDA zajmuje 50–70% czasu
+- **Pierwsze kroki EDA**: kształt, braki, rozkłady, outliery, duplikaty
+- **Kiedy SQL, kiedy Python, kiedy Excel**: heurystyka wyboru narzędzia
+
+**Następna lekcja:** SQL dla analityków - SELECT, GROUP BY, JOIN i window functions w projektach z realnych danych.

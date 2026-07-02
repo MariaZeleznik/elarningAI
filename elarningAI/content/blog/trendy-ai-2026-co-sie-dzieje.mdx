@@ -1,0 +1,69 @@
+Styczeń 2026. Właśnie skończyłam pisać podsumowanie roku dla klientów i postanowiłam zrobić z niego artykuł — bo jest kilka obserwacji, które uważam za ważne, a które giną w morzu "TOP 10 TRENDÓW AI". Tych artykułów jest za dużo. Mój ma być inny: bez przepowiedni o AGI, bez hype'u.
+
+Piszę to jako praktyk, nie analityk rynkowy. Żadnego "industry observer reveals" w trzeciej osobie. Obserwacje z projektów, konferencji, rozmów z kolegami w terenie.
+
+## Co faktycznie zmieniło się w 2025
+
+Zanim 2026, warto spojrzeć wstecz — bo tła bez nie ma perspektywy.
+
+Reasoning models to była prawdziwa zmiana. O1 od OpenAI, potem o3, Claude 3.7 z extended thinking — modele, które dosłownie "myślą dłużej" zanim odpiszą. Benchmark MATH (olimpijskie zadania matematyczne) przeskoczył z okolic 50% dla GPT-4 do ponad 90%. To nie jest kosmetyczna poprawa. To zmiana rzędu wielkości.
+
+Multimodalność przestała być "demo na prezentacje". W 2024 imponowała na scenie i działała kiepsko w produkcji. W 2025 widziałam system przetwarzający 10 000 faktur dziennie — zdjęcia, różne formaty, polskie i angielskie — z 97% dokładnością. Poprzedni system? Ręczne przepisywanie przez 3 osoby.
+
+Koszt tokenów runął. GPT-4 w grudniu 2024 kosztował około 30 dolarów za milion tokenów. GPT-4o mini rok później — 0,15 dolara. To 200× redukcja. Projekty, które były nieopłacalne w 2024, stały się oczywistymi wyborami w 2025.
+
+I jeszcze jedno, o czym za mało się mówi: generowanie kodu naprawdę zaczęło działać. Cursor, Copilot — przeprowadziłam własne badanie na 8 seniorach z zespołu klienta. 35% szybciej na typowych zadaniach. Byłam sceptyczna. Dane mnie przekonały.
+
+## Trendy 2026, które uważam za substancję
+
+### Synteza danych
+
+Modele trenowane są coraz częściej na danych syntetycznych — wygenerowanych przez inne modele. Brzmi jak wąż jedzący ogon i od strony teoretycznej budzi pytania o "model collapse". W praktyce dobra synteza danych działa.
+
+Widziałam projekt, gdzie 5 000 ludzkich przykładów + 50 000 syntetycznych dało lepszy wynik niż 5 000 ludzkich. Ale — i to ważne — jakość syntetycznych danych jest kluczowa. Garbage in, garbage out działa tu podwójnie.
+
+### Test-time compute scaling
+
+To odkrycie, które przyszło trochę z zaskoczenia: "więcej myślenia w czasie inferencji" działa. Modele reasoning poświęcają więcej tokenów na wewnętrzne rozumowanie przed odpowiedzią. I to kosztuje. Ale zamienia jednorazowy koszt trenowania większego modelu na kontrolowalny, skalowalny koszt inference.
+
+W 2026 przewiduję że większość "inteligentnych" systemów będzie dynamicznie skalować czas myślenia do trudności pytania. Proste FAQ — szybka odpowiedź. Złożona analiza kontraktu — daj modelu 30 sekund.
+
+### Agenci w produkcji — i pierwsze problemy
+
+2025 to był rok agentów-prototypów. 2026 to rok agentów-w-produkcji — ze wszystkimi bólami, które to oznacza.
+
+Z mojej obserwacji: agenty działają świetnie w 70–80% przypadków. Reszta to edge cases kosztujące nieproporcjonalnie dużo debugowania. "Human-in-the-loop" jest łatwe do opisania i trudne do wdrożenia — kiedy dokładnie pytać człowieka? Za często: system jest bezużyteczny. Za rzadko: agent robi głupstwa. Pamięć między sesjami to aktywny problem badawczy i praktyczny.
+
+Nie twierdzę, że agenci nie działają. Twierdzę, że wymagają dużo więcej inżynierii produkcyjnej niż prototype sugeruje.
+
+### Modele dziedzinowe kontra ogólne
+
+Coraz więcej danych, że małe, wyspecjalizowane modele biją duże ogólne w specyficznych dziedzinach. Modele 7B z dobrymi danymi treningowymi mogą być lepsze od GPT-4 w bardzo wąskiej domenie.
+
+Dla polskich firm to oznacza pytanie strategiczne: kupić dostęp do dużego modelu ogólnego, czy inwestować we własny mniejszy? W 2025 niemal wszyscy szli przez API ogólnych modeli. W 2026 widzę pierwsze polskie firmy rozważające własne modele — głównie w sektorach regulowanych, gdzie prywatność danych jest ograniczeniem.
+
+### Koszt tokenów przestaje być głównym ograniczeniem
+
+Przy obecnych trendach cenowych, w 2026 pytanie "ile kosztują tokeny?" przestanie dominować decyzji architektonicznych dla większości zastosowań. Zamiast tego: latencja, bezpieczeństwo danych, niezawodność, zgodność z AI Act.
+
+AI Act UE wchodzi w życie w 2026. Dla wielu firm to pierwsze realne wymagania compliance'owe dla systemów AI. To nie jest trend techniczny, ale zmienia jak i gdzie AI można wdrażać.
+
+## Co uważam za szum
+
+AGI w ciągu 2 lat — słyszę to od 4 lat. Reasoning models są imponujące, ale "reasoning w benchmarkach" to nie "ogólna inteligencja". Kruche poza obszarami treningu.
+
+"Model robi wszystko sam" — autonomiczne agenty bez nadzoru są ciekawym eksperymentem naukowym. W produkcji biznesowej: nie teraz.
+
+Generowanie wideo jako killer app dla firm — imponujące technicznie, zastosowania biznesowe poza marketingiem nadal niszowe.
+
+## Co z tego wynika dla Ciebie
+
+Programiście i analityku: warto teraz opanować agentyczne frameworki (LangGraph, OpenAI SDK). Warto nauczyć się ewaluacji modeli — "czy to działa?" musi oznaczać liczby, nie intuicję. I warto śledzić AI Act, bo compliance staje się częścią stacku technologicznego.
+
+Menadżerowi produktu i firmy: w 2026 "używamy AI" przestaje wystarczać. Ważne jest "jak mierzymy wartość z AI". Prototyp to nie produkt. Prywatność danych staje się ograniczeniem architektonicznym, nie czymś na koniec listy.
+
+Fascynujący czas. Wrócimy tu za rok i sprawdzimy co trafiłam.
+
+---
+
+*Pytania o konkretne trendy lub ich implementację? Chętnie dyskutuję — pisz na LinkedIn.*

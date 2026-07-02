@@ -1,0 +1,393 @@
+﻿---
+title: Python dla Machine Learning - scikit-learn od podstaw
+module: 1
+order: 2
+free: false
+duration: 60
+---
+
+scikit-learn to biblioteka, która zdemokratyzowała Machine Learning. Algorytm, który w latach 90. był tematem doktoratu, teraz implementujesz w 5 liniach. Ale żeby używać go *dobrze* - nie tylko kopiować kod z tutoriali - musisz rozumieć co się dzieje pod spodem.
+
+Ta lekcja poprowadzi cię przez kompletny przepływ projektu ML: od surowych danych do ewaluacji modelu. Każdy krok zostanie wyjaśniony, nie tylko pokazany.
+
+## Unified API scikit-learn - jeden wzorzec dla wszystkiego
+
+Projektanci scikit-learn podjęli kluczową decyzję architektoniczną: każdy estymator (model) ma identyczne API.
+
+```python
+# To samo API dla regresji logistycznej...
+from sklearn.linear_model import LogisticRegression
+model = LogisticRegression()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# ...i dla Random Forest...
+from sklearn.ensemble import RandomForestClassifier
+model = RandomForestClassifier()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+
+# ...i dla sieci neuronowej w scikit-learn
+from sklearn.neural_network import MLPClassifier
+model = MLPClassifier()
+model.fit(X_train, y_train)
+y_pred = model.predict(X_test)
+```
+
+Trzy metody, które musisz znać:
+
+| Metoda | Kiedy | Co robi |
+|--------|-------|---------|
+| `fit(X, y)` | Trening | Uczy się parametrów z danych |
+| `predict(X)` | Predykcja | Zwraca klasy/wartości dla nowych danych |
+| `transform(X)` | Preprocessor | Przekształca dane (np. normalizacja) |
+| `fit_transform(X)` | Skrót | `fit` + `transform` w jednym kroku |
+
+## Dane w ML - format i wymagania
+
+scikit-learn oczekuje danych w konkretnym formacie:
+
+```python
+import numpy as np
+import pandas as pd
+
+# X - macierz cech: kształt (n_samples, n_features)
+# y - wektor etykiet: kształt (n_samples,)
+
+# Przykład z pandas DataFrame
+df = pd.read_csv('klienci.csv')
+
+# Zdefiniuj cechy (X) i cel (y)
+feature_cols = ['wiek', 'przychod', 'liczba_zakupow', 'dni_od_rejestracji']
+X = df[feature_cols].values  # numpy array (1000, 4)
+y = df['zrezygnuje'].values  # numpy array (1000,)
+
+print(f"Kształt X: {X.shape}")  # (1000, 4)
+print(f"Kształt y: {y.shape}")  # (1000,)
+print(f"Klasy: {np.unique(y)}")  # [0 1]
+```
+
+**Ważne wymagania:**
+- Brak wartości NaN - scikit-learn rzuci błąd jeśli X lub y zawiera NaN
+- Tylko liczby - zmienne kategoryczne trzeba zakodować
+- Spójna liczba cech między `fit` a `predict`
+
+## Podział danych - klucz do rzetelnej oceny
+
+To jest jeden z najczęstszych błędów początkujących: ocenianie modelu na tych samych danych, na których był trenowany.
+
+```python
+from sklearn.model_selection import train_test_split
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y,
+    test_size=0.2,      # 20% na test, 80% na trening
+    random_state=42,    # dla reprodukowalności
+    stratify=y          # zachowaj proporcje klas (ważne przy niezbalansowanych danych)
+)
+
+print(f"Trening: {X_train.shape[0]} próbek")  # 800
+print(f"Test: {X_test.shape[0]} próbek")       # 200
+print(f"Proporcja klasy 1 w treningu: {y_train.mean():.1%}")
+print(f"Proporcja klasy 1 w teście:   {y_test.mean():.1%}")
+# Dzięki stratify - proporcje są identyczne
+```
+
+**Złota zasada:** zbiór testowy jest "sejfem". Otwierasz go tylko raz - na koniec, żeby zgłosić finalną wydajność modelu. Jeśli używasz go do dostrajania modelu, oszukujesz - i twoja ocena jest zbyt optymistyczna.
+
+## Preprocessing - przygotowanie danych
+
+### Normalizacja i standaryzacja
+
+Wiele algorytmów jest wrażliwych na skalę cech. Klient z "wiek=35" i "przychód=150000" - te dwie cechy są w kompletnie innych skalach. Modele oparte na odległości (KNN, SVM) lub gradiencie (regresja logistyczna, sieci neuronowe) mogą przez to preferować cechy o większych wartościach.
+
+```python
+from sklearn.preprocessing import StandardScaler, MinMaxScaler
+
+# StandardScaler: z-score, wynik ma mean=0, std=1
+scaler = StandardScaler()
+
+# WAŻNE: fit tylko na treningu, transform na obu
+# Nie: scaler.fit(X)  ← data leakage!
+# Tak:
+X_train_scaled = scaler.fit_transform(X_train)   # uczy się mean/std, transformuje
+X_test_scaled = scaler.transform(X_test)         # używa mean/std z treningu
+
+# MinMaxScaler: normalizuje do zakresu [0, 1]
+scaler_mm = MinMaxScaler()
+X_train_mm = scaler_mm.fit_transform(X_train)
+X_test_mm = scaler_mm.transform(X_test)
+```
+
+**Dlaczego fit tylko na treningu?** Gdybyś zrobił `scaler.fit(X)` (całe dane), model wiedziałby o statystykach danych testowych podczas treningu. To data leakage - wyniki byłyby zbyt optymistyczne.
+
+### Kodowanie zmiennych kategorycznych
+
+```python
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+import pandas as pd
+
+df = pd.DataFrame({
+    'miasto': ['Warszawa', 'Kraków', 'Gdańsk', 'Warszawa', 'Kraków'],
+    'kategoria': ['A', 'B', 'A', 'C', 'B'],
+    'wynik': [1, 0, 1, 0, 1]
+})
+
+# Opcja 1: One-hot encoding przez pandas (najprostsze)
+df_encoded = pd.get_dummies(df, columns=['miasto', 'kategoria'], drop_first=True)
+
+# Opcja 2: OneHotEncoder scikit-learn (do Pipeline)
+from sklearn.preprocessing import OneHotEncoder
+enc = OneHotEncoder(sparse_output=False, handle_unknown='ignore')
+enc.fit_transform(df[['miasto']])
+# Wynik: macierz binarna, jedna kolumna per unikalna wartość
+```
+
+**One-hot vs. Label Encoding:**
+- **Label Encoding** (A→0, B→1, C→2): stosuj tylko dla zmiennych *ordinalnych* (małe→średnie→duże). Dla nominalnych (miasta, kolory) tworzy fałszywy porządek - model "myśli" że Gdańsk (2) > Kraków (1).
+- **One-hot Encoding**: właściwe dla zmiennych nominalnych. Tworzy kolumny binarne.
+
+### Obsługa brakujących danych
+
+```python
+from sklearn.impute import SimpleImputer
+
+# Wypełnij braki medianą dla kolumn numerycznych
+imputer = SimpleImputer(strategy='median')
+# strategy: 'mean', 'median', 'most_frequent', 'constant'
+
+X_train_imputed = imputer.fit_transform(X_train)
+X_test_imputed = imputer.transform(X_test)
+
+# Sprawdź ile braków jest w DataFrame
+print(df.isnull().sum())
+print(f"% braków w kolumnie 'przychod': {df['przychod'].isna().mean():.1%}")
+```
+
+## Pipeline - preprocessing + model w jednym obiekcie
+
+Najczęstszy błąd: preprocessing i model jako osobne kroki, które trzeba pamiętać stosować w odpowiedniej kolejności. Pipeline rozwiązuje to elegancko:
+
+```python
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.impute import SimpleImputer
+
+# Definiujesz sekwencję kroków jako listę (nazwa, obiekt)
+pipeline = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),    # 1. uzupełnij braki
+    ('scaler', StandardScaler()),                       # 2. standaryzuj
+    ('model', RandomForestClassifier(n_estimators=100, random_state=42))  # 3. model
+])
+
+# fit i predict jak normalny model - Pipeline obsługuje kolejność automatycznie
+pipeline.fit(X_train, y_train)
+y_pred = pipeline.predict(X_test)
+
+# Przy predict: nowe dane automatycznie przechodzą przez imputer i scaler
+# Korzystając z parametrów nauczonych na X_train - zero data leakage
+```
+
+Pipeline to standard w produkcyjnym ML. Jeden obiekt zawiera całą logikę przetwarzania - łatwy do serializacji, testowania i wdrożenia.
+
+## Ocena modeli - metryki dla różnych problemów
+
+### Klasyfikacja binarna
+
+```python
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    roc_auc_score,
+    confusion_matrix,
+    classification_report
+)
+
+y_pred = pipeline.predict(X_test)
+y_proba = pipeline.predict_proba(X_test)[:, 1]  # prawdopodobieństwo klasy 1
+
+print(f"Accuracy:  {accuracy_score(y_test, y_pred):.3f}")
+print(f"Precision: {precision_score(y_test, y_pred):.3f}")
+print(f"Recall:    {recall_score(y_test, y_pred):.3f}")
+print(f"F1-score:  {f1_score(y_test, y_pred):.3f}")
+print(f"ROC AUC:   {roc_auc_score(y_test, y_proba):.3f}")
+
+# Confusion matrix
+cm = confusion_matrix(y_test, y_pred)
+print(f"\nConfusion Matrix:\n{cm}")
+#              Predicted 0  Predicted 1
+# Actual 0     TN=85        FP=10
+# Actual 1     FN=5         TP=100
+
+# Pełny raport
+print(classification_report(y_test, y_pred, target_names=['nie odejdzie', 'odejdzie']))
+```
+
+**Która metryka dla jakiego problemu?**
+
+| Problem | Właściwa metryka | Dlaczego |
+|---------|-----------------|----------|
+| Wykrywanie raka | **Recall** (wysoki) | FN (pominięty rak) jest gorszy niż FP |
+| Filtr spamu | **Precision** (wysoki) | FP (dobry email w spamie) jest gorszy niż FN |
+| Ranking kredytowy | **ROC AUC** | Odporne na niezbalansowane klasy |
+| Niezbalansowane klasy (99%/1%) | **F1, PR-AUC** | Accuracy jest tu bezużyteczna |
+| Konkurs Kaggle | **Zależy od zadania** | Przeczytaj specyfikację |
+
+### Cross-validation - rzetelniejsza ocena
+
+Jeden podział train/test może być losowy - możesz "trafić" na łatwy zbiór testowy. K-fold cross-validation daje bardziej stabilną ocenę:
+
+```python
+from sklearn.model_selection import cross_val_score, StratifiedKFold
+
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+scores = cross_val_score(
+    pipeline,
+    X, y,
+    cv=cv,
+    scoring='roc_auc',
+    n_jobs=-1  # użyj wszystkich rdzeni CPU
+)
+
+print(f"ROC AUC: {scores.mean():.3f} ± {scores.std():.3f}")
+print(f"Wyniki per fold: {scores.round(3)}")
+# ROC AUC: 0.847 ± 0.018
+# Wyniki per fold: [0.831 0.851 0.862 0.844 0.847]
+```
+
+5-fold CV trenuje model 5 razy, każdy fold raz jako zbiór testowy. Wynik ± odchylenie standardowe mówi nie tylko o jakości, ale też o stabilności modelu.
+
+## Kompletny projekt: churn prediction
+
+Złóżmy wszystko razem w realistycznym projekcie:
+
+```python
+import pandas as pd
+import numpy as np
+from sklearn.model_selection import train_test_split, cross_val_score, StratifiedKFold
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.impute import SimpleImputer
+from sklearn.compose import ColumnTransformer
+from sklearn.ensemble import GradientBoostingClassifier
+from sklearn.metrics import classification_report, roc_auc_score
+
+# --- 1. Wczytanie danych ---
+df = pd.read_csv('telecom_churn.csv')
+print(df.shape)          # (7043, 21)
+print(df['Churn'].value_counts(normalize=True))
+# False    0.855   ← 85.5% zostaje
+# True     0.145   ← 14.5% odchodzi - niezbalansowane klasy!
+
+# --- 2. Podział cech na numeryczne i kategoryczne ---
+numeric_features = ['tenure', 'MonthlyCharges', 'TotalCharges']
+categorical_features = ['gender', 'InternetService', 'Contract', 'PaymentMethod']
+
+X = df[numeric_features + categorical_features]
+y = df['Churn'].map({'Yes': 1, 'No': 0})
+
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42, stratify=y
+)
+
+# --- 3. Preprocessing oddzielny dla każdego typu cech ---
+numeric_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='median')),
+    ('scaler', StandardScaler()),
+])
+
+categorical_transformer = Pipeline([
+    ('imputer', SimpleImputer(strategy='most_frequent')),
+    ('onehot', OneHotEncoder(handle_unknown='ignore', sparse_output=False)),
+])
+
+preprocessor = ColumnTransformer([
+    ('num', numeric_transformer, numeric_features),
+    ('cat', categorical_transformer, categorical_features),
+])
+
+# --- 4. Pełny Pipeline z modelem ---
+clf = Pipeline([
+    ('preprocessor', preprocessor),
+    ('model', GradientBoostingClassifier(
+        n_estimators=200,
+        learning_rate=0.05,
+        max_depth=4,
+        random_state=42
+    ))
+])
+
+# --- 5. Cross-validation (5-fold) ---
+cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+cv_scores = cross_val_score(clf, X_train, y_train, cv=cv, scoring='roc_auc')
+print(f"CV ROC AUC: {cv_scores.mean():.3f} ± {cv_scores.std():.3f}")
+
+# --- 6. Finalny trening i ocena na teście ---
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+y_proba = clf.predict_proba(X_test)[:, 1]
+
+print(f"\nTest ROC AUC: {roc_auc_score(y_test, y_proba):.3f}")
+print("\n" + classification_report(y_test, y_pred, target_names=['Zostaje', 'Odchodzi']))
+```
+
+**Oczekiwany output:**
+```
+CV ROC AUC: 0.848 ± 0.012
+Test ROC AUC: 0.851
+
+              precision  recall  f1-score   support
+    Zostaje       0.88    0.93      0.90      1211
+    Odchodzi      0.63    0.49      0.55       198
+
+   accuracy                         0.83      1409
+```
+
+Zwróć uwagę: accuracy 83%, ale recall dla "Odchodzi" tylko 49%. Połowę churnerów przegapiamy. To jest typowe przy niezbalansowanych klasach - i argument za tym, żeby zawsze patrzeć na pełny `classification_report`, nie tylko accuracy.
+
+## Najczęstsze błędy w projekcie ML
+
+### Błąd 1: fit na całych danych
+
+```python
+# ŹLE - data leakage
+scaler.fit(X)               # scaler widzi dane testowe
+X_scaled = scaler.transform(X)
+X_train, X_test = train_test_split(X_scaled)
+
+# DOBRZE
+X_train, X_test = train_test_split(X)
+scaler.fit(X_train)         # scaler nie wie o X_test
+X_train = scaler.transform(X_train)
+X_test = scaler.transform(X_test)
+
+# NAJLEPIEJ: używaj Pipeline - automatycznie chroni przed data leakage
+```
+
+### Błąd 2: ignorowanie `random_state`
+
+Bez `random_state=42`, każde uruchomienie daje inne wyniki. Utrudnia debugowanie i porównywanie wyników. Zawsze ustawiaj stały seed.
+
+### Błąd 3: ocena tylko na accuracy
+
+Przy 95% próbek "zdrowych" i 5% "chorych" - model który zawsze mówi "zdrowy" osiąga 95% accuracy. Jest całkowicie bezużyteczny. Sprawdzaj zawsze F1, recall, confusion matrix dla niezbalansowanych danych.
+
+---
+
+## Podsumowanie
+
+W tej lekcji nauczyłeś się:
+
+- **Unified API scikit-learn**: fit/predict/transform - to samo dla każdego algorytmu
+- **Podział danych**: train/test split z `stratify`, dlaczego fit tylko na treningu
+- **Preprocessing**: standaryzacja, one-hot encoding, imputacja brakujących wartości
+- **Pipeline**: preprocessor + model w jednym obiekcie, zero data leakage
+- **Metryki**: kiedy accuracy jest myląca, kiedy używać precision/recall/F1/AUC
+- **Cross-validation**: 5-fold StratifiedKFold dla rzetelnej oceny
+- **Kompletny projekt**: churn prediction end-to-end
+
+**Następna lekcja:** Drzewa decyzyjne i Random Forest - jak działają od środka i jak interpretować feature importance.

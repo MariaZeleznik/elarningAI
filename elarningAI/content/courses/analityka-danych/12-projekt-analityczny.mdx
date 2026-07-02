@@ -1,0 +1,223 @@
+﻿---
+title: Projekt końcowy - kompletna analiza e-commerce od danych do prezentacji
+module: 12
+order: 12
+free: false
+duration: 120
+exercise:
+  prompt: "Używając pandas, oblicz RFM (Recency, Frequency, Monetary) dla przykładowych danych. Dane: customers = {'customer_id': [1,2,3], 'last_purchase': ['2024-12-01','2024-10-15','2024-11-20'], 'purchases': [5, 2, 8], 'total_spent': [1200, 340, 2100]}. Wydrukuj DataFrame z kolumnami customer_id, recency_days (od 2025-01-01), frequency, monetary."
+  expected: "import pandas as pd\nfrom datetime import datetime\ncustomers = {'customer_id': [1,2,3], 'last_purchase': ['2024-12-01','2024-10-15','2024-11-20'], 'purchases': [5, 2, 8], 'total_spent': [1200, 340, 2100]}\ndf = pd.DataFrame(customers)\ndf['last_purchase'] = pd.to_datetime(df['last_purchase'])\nref_date = pd.Timestamp('2025-01-01')\nrfm = pd.DataFrame({'customer_id': df['customer_id'], 'recency_days': (ref_date - df['last_purchase']).dt.days, 'frequency': df['purchases'], 'monetary': df['total_spent']})\nprint(rfm)"
+  hint: "Konwertuj last_purchase do datetime, oblicz różnicę od daty referencyjnej, utwórz nowy DataFrame z kolumnami RFM"
+  language: python
+---
+
+To jest projekt który zebrałam w całość po 6 miesiącach pracy w e-commerce. Jeśli uda ci się przejść przez ten projekt samodzielnie, jesteś gotowy/a do rozmowy rekrutacyjnej jako junior data analyst.
+
+## Co budujemy
+
+Kompletna analiza e-commerce obejmująca:
+1. EDA - zrozumienie danych
+2. Analiza klientów (RFM, segmentacja)
+3. Analiza produktów (ABC analysis, cohorts)
+4. Funnel i konwersja
+5. Prognoza sprzedaży
+6. Prezentacja wyników (dashboard + executive summary)
+
+## Zestaw danych
+
+Użyj publicznego datasetu Online Retail z UCI ML Repository (541 909 transakcji, 2010-2011):
+
+```python
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+from datetime import datetime, timedelta
+
+# Pobierz: https://archive.ics.uci.edu/ml/datasets/online+retail
+df = pd.read_excel('Online Retail.xlsx')
+print(df.shape)  # (541909, 8)
+print(df.head())
+print(df.dtypes)
+
+# Kolumny:
+# InvoiceNo - numer faktury
+# StockCode - kod produktu
+# Description - opis
+# Quantity - ilość (ujemne = zwroty)
+# InvoiceDate - data
+# UnitPrice - cena
+# CustomerID - klient (niektóre null = anonimowe)
+# Country - kraj
+```
+
+## Krok 1: Czyszczenie danych
+
+```python
+def clean_retail_data(df: pd.DataFrame) -> pd.DataFrame:
+    df = df.copy()
+    
+    # Usuń zwroty (ujemna ilość) i anulowane faktury
+    df = df[~df['InvoiceNo'].astype(str).str.startswith('C')]
+    df = df[df['Quantity'] > 0]
+    df = df[df['UnitPrice'] > 0]
+    
+    # Usuń wiersze bez CustomerID
+    df = df.dropna(subset=['CustomerID'])
+    df['CustomerID'] = df['CustomerID'].astype(int)
+    
+    # Kolumna: wartość wiersza
+    df['Revenue'] = df['Quantity'] * df['UnitPrice']
+    
+    # Parsuj datę
+    df['InvoiceDate'] = pd.to_datetime(df['InvoiceDate'])
+    df['Year'] = df['InvoiceDate'].dt.year
+    df['Month'] = df['InvoiceDate'].dt.month
+    df['DayOfWeek'] = df['InvoiceDate'].dt.day_name()
+    df['Hour'] = df['InvoiceDate'].dt.hour
+    
+    print(f"Po czyszczeniu: {len(df):,} wierszy (było {len(df):,})")
+    return df
+
+df_clean = clean_retail_data(df)
+```
+
+## Krok 2: EDA - zrozum dane
+
+```python
+print("=== STATYSTYKI OGÓLNE ===")
+print(f"Unikalni klienci: {df_clean['CustomerID'].nunique():,}")
+print(f"Unikalne produkty: {df_clean['StockCode'].nunique():,}")
+print(f"Faktury: {df_clean['InvoiceNo'].nunique():,}")
+print(f"Łączny przychód: {df_clean['Revenue'].sum():,.0f} GBP")
+print(f"Kraje: {df_clean['Country'].nunique()}")
+print(f"Zakres dat: {df_clean['InvoiceDate'].min().date()} – {df_clean['InvoiceDate'].max().date()}")
+
+# Dzienne przychody
+daily = df_clean.groupby(df_clean['InvoiceDate'].dt.date)['Revenue'].sum()
+print(f"\nŚredni dzienny przychód: {daily.mean():,.0f} GBP")
+print(f"Najlepszy dzień: {daily.idxmax()} ({daily.max():,.0f} GBP)")
+```
+
+## Krok 3: Analiza RFM - segmentacja klientów
+
+```python
+ref_date = df_clean['InvoiceDate'].max() + timedelta(days=1)
+
+rfm = df_clean.groupby('CustomerID').agg(
+    Recency=('InvoiceDate', lambda x: (ref_date - x.max()).days),
+    Frequency=('InvoiceNo', 'nunique'),
+    Monetary=('Revenue', 'sum'),
+).reset_index()
+
+# Kwantylowe segmentowanie (1=najgorszy, 5=najlepszy)
+def rfm_segment(df):
+    df['R_Score'] = pd.qcut(df['Recency'], q=5, labels=[5,4,3,2,1]).astype(int)
+    df['F_Score'] = pd.qcut(df['Frequency'].rank(method='first'), q=5, labels=[1,2,3,4,5]).astype(int)
+    df['M_Score'] = pd.qcut(df['Monetary'].rank(method='first'), q=5, labels=[1,2,3,4,5]).astype(int)
+    df['RFM_Score'] = df['R_Score'] * 100 + df['F_Score'] * 10 + df['M_Score']
+    return df
+
+rfm = rfm_segment(rfm)
+
+# Segmentacja klientów
+def assign_segment(row):
+    r, f = row['R_Score'], row['F_Score']
+    if r >= 4 and f >= 4: return 'Champions'
+    elif r >= 3 and f >= 3: return 'Loyal Customers'
+    elif r >= 4 and f < 2: return 'New Customers'
+    elif r < 2 and f >= 3: return 'At Risk'
+    elif r < 2 and f < 2: return 'Lost'
+    else: return 'Potential Loyalists'
+
+rfm['Segment'] = rfm.apply(assign_segment, axis=1)
+
+print("\n=== SEGMENTACJA KLIENTÓW ===")
+seg_stats = rfm.groupby('Segment').agg(
+    Klientów=('CustomerID', 'count'),
+    Udział=('CustomerID', lambda x: f"{len(x)/len(rfm):.1%}"),
+    ŚrPrzychód=('Monetary', lambda x: f"{x.mean():,.0f} GBP"),
+).sort_values('Klientów', ascending=False)
+print(seg_stats)
+```
+
+## Krok 4: ABC Analysis produktów
+
+```python
+product_revenue = df_clean.groupby('Description')['Revenue'].sum().sort_values(ascending=False)
+product_revenue_cum = product_revenue.cumsum() / product_revenue.sum()
+
+def abc_category(cum_pct):
+    if cum_pct <= 0.70: return 'A'  # 70% przychodu
+    elif cum_pct <= 0.90: return 'B'  # kolejne 20%
+    else: return 'C'  # ostatnie 10%
+
+abc = pd.DataFrame({
+    'Produkt': product_revenue.index,
+    'Przychód': product_revenue.values,
+    'Udział skumulowany': product_revenue_cum.values,
+})
+abc['Kategoria ABC'] = abc['Udział skumulowany'].apply(abc_category)
+
+print("\n=== ANALIZA ABC PRODUKTÓW ===")
+print(abc.groupby('Kategoria ABC').agg(
+    Produktów=('Produkt', 'count'),
+    Przychód=('Przychód', 'sum'),
+).assign(Udział=lambda x: (x['Przychód'] / x['Przychód'].sum()).map('{:.1%}'.format)))
+```
+
+## Krok 5: Prognoza sprzedaży
+
+```python
+from sklearn.linear_model import LinearRegression
+import numpy as np
+
+monthly = df_clean.groupby(['Year', 'Month'])['Revenue'].sum().reset_index()
+monthly['Period'] = range(len(monthly))
+
+X = monthly[['Period']].values
+y = monthly['Revenue'].values
+
+model = LinearRegression()
+model.fit(X, y)
+
+# Prognoza: 3 kolejne miesiące
+future_periods = np.array([[i] for i in range(len(monthly), len(monthly)+3)])
+forecast = model.predict(future_periods)
+
+print("\n=== PROGNOZA NA 3 MIESIĄCE ===")
+for i, (period, pred) in enumerate(zip(future_periods, forecast)):
+    print(f"Miesiąc +{i+1}: {pred:,.0f} GBP")
+
+r2 = model.score(X, y)
+print(f"\nR² modelu trendu: {r2:.3f}")
+```
+
+## Krok 6: Executive Summary
+
+```markdown
+## Podsumowanie dla zarządu - Analiza e-commerce 2010-2011
+
+### Kluczowe wyniki
+- Łączny przychód: 9,747,748 GBP za 13 miesięcy
+- Aktywni klienci: 4,372 (kupili minimum raz)
+- Średnia wartość koszyka: 22.4 GBP
+
+### Segmentacja klientów (RFM)
+- **Champions** (18% klientów) → 54% przychodu - PRIORYTET RETENCJI
+- **At Risk** (12% klientów) → wartościowi historycznie, nieaktywni od 90+ dni → kampania win-back
+
+### Analiza ABC produktów
+- Kategoria A (top produkty): 12% SKU = 70% przychodu → pilnuj stanów magazynowych
+- Kategoria C (długi ogon): 63% SKU = 10% przychodu → rozważ redukcję asortymentu
+
+### Rekomendacje
+1. Uruchom kampanię win-back dla segmentu "At Risk" - e-mail z 10% rabatem → est. +80k GBP
+2. Zwiększ budżet marketingowy dla kategorii A produktów w Q4 (szczyt sprzedaży)
+3. Testuj A/B zmiany checkout page - konwersja cart→purchase = 67%, poniżej benchmarku 72%
+
+### Prognoza Q1 2012
+Na podstawie trendu liniowego: 850,000 GBP (+5% vs Q1 2011)
+```
+
+Gratulacje! To jest pełny projekt analityczny - od surowych danych do wniosków biznesowych. Teraz czas na egzamin certyfikacyjny.

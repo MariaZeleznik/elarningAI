@@ -1,0 +1,186 @@
+﻿---
+title: Sieci neuronowe - od perceptronu do głębokiej sieci
+module: 5
+order: 6
+free: false
+duration: 65
+exercise:
+  prompt: "Stwórz prostą sieć neuronową w PyTorch: warstwa wejściowa (4 neurony) → ukryta (8 neuronów, ReLU) → wyjściowa (3 neurony). Wydrukuj architekturę modelu."
+  expected: "import torch\nimport torch.nn as nn\nmodel = nn.Sequential(\n    nn.Linear(4, 8),\n    nn.ReLU(),\n    nn.Linear(8, 3)\n)\nprint(model)"
+  hint: "Użyj nn.Sequential z warstwami nn.Linear i aktywacją nn.ReLU pomiędzy nimi"
+  language: python
+---
+
+Pierwsza sieć neuronową napisałam w NumPy ręcznie - backpropagation, gradienty, wszystko z zera. Zajęło to 3 dni i produkowało błędy przez kolejne 2. Nie rób tego. Naucz się intuicji matematycznej, a implementację oddaj PyTorchowi.
+
+## Perceptron - podstawowy atom sieci neuronowej
+
+Perceptron to jedno "sztuczne siermy neuronowe": mnoży wejścia przez wagi, sumuje, przepuszcza przez funkcję aktywacji:
+
+```
+y = f(w₁x₁ + w₂x₂ + ... + wₙxₙ + b)
+```
+
+Gdzie `f` to funkcja aktywacji. Bez niej: cała sieć to tylko regresja liniowa (złożenie liniowych transformacji jest liniowe).
+
+```python
+import torch
+import torch.nn as nn
+
+# Jeden neuron: wejście 4D → wyjście 1D
+neuron = nn.Linear(in_features=4, out_features=1)
+
+# Wejście: batch 3 próbek, każda z 4 cechami
+x = torch.randn(3, 4)
+output = neuron(x)
+print(f"Wejście: {x.shape}")   # torch.Size([3, 4])
+print(f"Wyjście: {output.shape}")  # torch.Size([3, 1])
+```
+
+## Funkcje aktywacji - dlaczego ważne
+
+```python
+import matplotlib.pyplot as plt
+import numpy as np
+
+x = np.linspace(-3, 3, 100)
+
+fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+
+# ReLU - Rectified Linear Unit
+relu = np.maximum(0, x)
+axes[0].plot(x, relu, 'b')
+axes[0].set_title('ReLU\nf(x) = max(0,x)')
+axes[0].grid(True)
+
+# Sigmoid
+sigmoid = 1 / (1 + np.exp(-x))
+axes[1].plot(x, sigmoid, 'r')
+axes[1].set_title('Sigmoid\nf(x) = 1/(1+e^-x)')
+axes[1].grid(True)
+
+# Tanh
+tanh = np.tanh(x)
+axes[2].plot(x, tanh, 'g')
+axes[2].set_title('Tanh\nf(x) = tanh(x)')
+axes[2].grid(True)
+
+plt.tight_layout()
+plt.show()
+```
+
+**W praktyce:** używaj ReLU w warstwach ukrytych (szybki, skuteczny), Sigmoid tylko w wyjściu dla klasyfikacji binarnej, Softmax dla wieloklasowej.
+
+## Wielowarstwowa sieć (MLP) w PyTorch
+
+```python
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from sklearn.datasets import load_iris
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import StandardScaler
+
+# Dane
+X_np, y_np = load_iris(return_X_y=True)
+scaler = StandardScaler()
+X_np = scaler.fit_transform(X_np)
+
+X_train, X_test, y_train, y_test = train_test_split(X_np, y_np, test_size=0.2, random_state=42)
+
+# Konwersja do tensorów PyTorch
+X_train = torch.FloatTensor(X_train)
+y_train = torch.LongTensor(y_train)
+X_test = torch.FloatTensor(X_test)
+y_test = torch.LongTensor(y_test)
+
+# Architektura
+model = nn.Sequential(
+    nn.Linear(4, 16),
+    nn.ReLU(),
+    nn.Dropout(0.2),    # regularizacja: losowo zeruje 20% neuronów
+    nn.Linear(16, 8),
+    nn.ReLU(),
+    nn.Linear(8, 3),    # 3 klasy → bez aktywacji (CrossEntropyLoss robi softmax)
+)
+
+# Trenowanie
+optimizer = optim.Adam(model.parameters(), lr=0.01)
+criterion = nn.CrossEntropyLoss()
+
+for epoch in range(200):
+    model.train()
+    optimizer.zero_grad()           # wyczyść gradienty z poprzedniej iteracji
+    outputs = model(X_train)        # forward pass
+    loss = criterion(outputs, y_train)  # oblicz stratę
+    loss.backward()                 # backpropagation: oblicz gradienty
+    optimizer.step()                # gradient descent: zaktualizuj wagi
+    
+    if epoch % 50 == 0:
+        model.eval()
+        with torch.no_grad():
+            test_outputs = model(X_test)
+            test_loss = criterion(test_outputs, y_test)
+            pred = test_outputs.argmax(dim=1)
+            accuracy = (pred == y_test).float().mean()
+        print(f"Epoch {epoch}: loss={loss:.4f}, test_loss={test_loss:.4f}, acc={accuracy:.2%}")
+```
+
+## Backpropagation - jak sieć "uczy się"
+
+To algorytm który sprawia, że gradient descent działa dla głębokich sieci. PyTorch oblicza go automatycznie (autograd).
+
+Intuicja:
+1. **Forward pass**: dane idą przez sieć → predykcja → oblicz błąd (loss)
+2. **Backward pass**: błąd "wraca" przez sieć, obliczając **gradient** dla każdego parametru
+3. **Update**: każdy parametr przesuwamy o krok w kierunku obniżenia straty
+
+```python
+# Manual ilustracja autograd (rzadko to robisz ręcznie, ale warto zobaczyć)
+x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True)
+y = (x**2).sum()  # y = x₁² + x₂² + x₃²
+y.backward()      # oblicz gradienty
+print(x.grad)     # tensor([2., 4., 6.]) - pochodna y względem x: 2x
+```
+
+## Regularyzacja - jak walczyć z overfittingiem
+
+```python
+# Dropout - przykład użycia
+class LepraMLP(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.layers = nn.Sequential(
+            nn.Linear(100, 256),
+            nn.ReLU(),
+            nn.Dropout(0.5),   # 50% neuronów "wyłączane" podczas treningu
+            nn.Linear(256, 128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, 10),
+        )
+    
+    def forward(self, x):
+        return self.layers(x)
+
+# WAŻNE: Dropout jest aktywny tylko w trybie training
+model = LepraMLP()
+model.train()  # tryb trening → dropout aktywny
+model.eval()   # tryb ewaluacja → dropout wyłączony
+```
+
+**Inne techniki:**
+- **L2 regularizacja (Weight Decay)**: `optim.Adam(lr=0.01, weight_decay=1e-4)` - kara za duże wagi
+- **Early stopping**: zatrzymaj trening gdy val_loss przestaje maleć
+- **Batch normalization**: normalizuj aktywacje między warstwami
+
+## Kiedy sieć neuronowa, kiedy XGBoost?
+
+Dane tabelaryczne → XGBoost często wygrywa. Sieć neuronowa WYGRYWA przy:
+- Obrazach (CNN)
+- Tekście, mowie (transformery, LSTM)
+- Danych sekwencyjnych
+- Bardzo dużych datasetach (>1M próbek)
+- Zadaniach gdzie cechy mogą być automatycznie odkryte (feature learning)
+
+Następna lekcja: CNN - sieci konwolucyjne do rozpoznawania obrazów.

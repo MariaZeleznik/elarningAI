@@ -1,0 +1,138 @@
+﻿Opowiem Ci o momencie, który zmienił moje podejście do pracy z danymi.
+
+2019 rok. Miesiąc pracy przy analizie churnu dla firmy SaaS. Piękny raport - 18 stron, 24 wykresy, regresja logistyczna z AUC 0.87. Prezentowałem zarządowi przez 45 minut.
+
+Po prezentacji dyrektor finansowy powiedział: "Marek, to wszystko fajne, ale zdecydowaliśmy już przed tym spotkaniem że podnosimy ceny. Czy to wpłynie na churn?"
+
+Pracowałem miesiąc. Odpowiedź na ich pytanie zajęłaby mi 20 minut.
+
+To jest problem, z którym walczę od tamtego dnia - i który widzę u prawie każdego analityka, z którym pracuję.
+
+## Różnica między raportem a insightem
+
+Raport opisuje co się stało. Insight mówi co z tym zrobić.
+
+Raport: "Churn wzrósł o 3.2% w Q3 w porównaniu z Q2."
+Insight: "Klienci na planie Starter rezygnują 3× częściej w ciągu 90 dni od zakupu. Jeśli do 30 dnia nie wykonają kluczowej akcji (integracja z CRM), 78% z nich odchodzi. Priorytet: poprawić onboarding dla Starter."
+
+Ten sam zbiór danych. Kompletnie różna wartość dla odbiorcy.
+
+Różnica nie jest w narzędziu. Nie jest w wykresie. Jest w pytaniu, które analityk sobie zadał przed otwarciem Tableau.
+
+## Struktury narracyjne dla danych
+
+Mózg ludzki nie przetwarza danych - przetwarza historię. To nie jest poetyckie - to neuronaukowe. Informacja opakowana w narrację jest zapamiętywana 22× lepiej (badania Stanford, Chip Heath).
+
+Trzy struktury, które używam najczęściej:
+
+### Struktura 1: Problem → Dowód → Rozwiązanie
+
+Najlepsza dla prezentacji z konkretną rekomendacją.
+
+- **Problem:** "Tracimy klientów po 3 miesiącach. Nie wiemy dlaczego."
+- **Dowód:** [dane] "78% klientów, którzy nie wykonali integracji w 30 dni, odchodzi."
+- **Rozwiązanie:** "Automated onboarding z checkpointami i alert dla CS po 15 dniach braku integracji."
+
+Prosto. Bezpośrednio. Trudno ignorować.
+
+### Struktura 2: Sytuacja → Komplikacja → Pytanie → Odpowiedź (SCR/SCQA)
+
+Klasyk McKinsey, działa świetnie gdy sytuacja jest złożona.
+
+- **Sytuacja:** "Rosniemy - przychód +40% YoY."
+- **Komplikacja:** "Ale marża spada - z 31% do 24%."
+- **Pytanie:** "Skąd pochodzi erozja marży?"
+- **Odpowiedź:** [analiza] "85% erozji pochodzi z dwóch kategorii: koszty logistyki (+12pp) i mix produktów (rośnie udział niskomarżowych)."
+
+### Struktura 3: Tak było → Tak jest → Tak powinno być
+
+Dobra dla projektów transformacyjnych.
+
+- **Tak było:** "Liczenie churnu zajmowało 3 dni ręcznie w Excelu."
+- **Tak jest:** "Zautomatyzowany dashboard, 15 minut na aktualizację."
+- **Tak powinno być:** "Predykcja churnu w czasie rzeczywistym z alertami dla CS."
+
+## Zasady wizualizacji, które naprawdę działają
+
+Mam regułę: **jeden wykres = jedna myśl**. Jeśli muszę pisać długi tytuł żeby wyjaśnić co pokazuje wykres - wykres jest zły.
+
+### Dobierz wykres do pytania
+
+Prosta reguła: zmiany w czasie — wykres liniowy. Porównanie kategorii — słupkowy (poziomy, bo nazwy się mieszczą). Udział w całości — słupek skumulowany, NIE kołowy. Zależność dwóch zmiennych — scatter plot. Rozkład w grupach — box plot lub histogram. Skąd pochodzi liczba — waterfall chart.
+
+Wykresy kołowe (pie chart): unikam ich prawie zawsze. Mózg ludzki słabo porównuje kąty. Jedyny wyjątek jaki robię: gdy masz 2–3 kategorie i jedna wyraźnie dominuje (powyżej 70%) — wtedy kołowy wizualnie uderza. W każdym innym przypadku słupkowy jest czytelniejszy.
+
+### Usuń wszystko, co nie niesie informacji
+
+Zasada "data-ink ratio" Edwarda Tufte: stosunek "tuszu informacyjnego" do "tuszu dekoracyjnego" powinien być jak najwyższy.
+
+Co usuń: linie siatki (jeśli nie są potrzebne do odczytu), legendy (jeśli możesz podpisać bezpośrednio), obramowania paneli, 3D (zawsze oszukuje percepcję), gradient fills (jednokolorowe wystarczy).
+
+Co dodaj: tytuł który mówi co wykres *znaczy* (nie co *pokazuje*), jednostki i źródło, highlight kluczowego punktu (annotation z wyjaśnieniem).
+
+### Hierarchia kolorów
+
+Jeden kolor dominujący (zwykle Twój brand color), jeden kolor akcent dla "to jest ważne", szary dla tła i porównania.
+
+Nie: tęcza kolorów, gdzie każdy słupek jest inny.
+Tak: wszystkie słupki szare, jeden słupek tematyczny (np. Q4) w kolorze brand, z adnotacją "Q4: +23% QoQ".
+
+## Najtrudniejsza część: mówienie co dane mówią, nie co chcielibyśmy żeby mówiły
+
+To jest etyczna kwestia, o której za mało się mówi.
+
+Widziałem prezentacje, gdzie:
+- Oś Y nie zaczyna od zera (sprawia, że mały wzrost wygląda jak ogromny)
+- Trend jest pokazany z 3 tygodni danych, bez sezonowości
+- Pozytywna liczba jest na slajdzie 2, negatywna zakopana w aneksie
+
+To nie jest storytelling. To manipulacja.
+
+Dobra opowieść danych buduje zaufanie. Manipulacja niszczy je - zazwyczaj po kilku cyklach, gdy "predykcje" się nie sprawdzają.
+
+Moja zasada: **jeśli dane nie potwierdzają hipotezy, powiedz to wprost**. "Spodziewaliśmy się, że promocja zwiększy konwersję. Nie zwiększyła. Oto dlaczego i co robimy dalej."
+
+To jest cenniejsze niż 20 slajdów potwierdzających to co zarząd chciał usłyszeć.
+
+## Struktura slajdu/raportu, który przekonuje
+
+Format one-page insight, który stosuję:
+
+```
+[Tytuł = wniosek, nie temat]
+"Onboarding jest główną przyczyną churnu Starter - 78% rezygnacji"
+
+[Jedna liczba lub wykres]
+[Wykres: churn rate według wykonania integracji w 30 dniach]
+
+[3 kluczowe punkty = dowód]
+• Klienci bez integracji churnu at 42% w 90 dni
+• Klienci z integracją: 6% churn w 90 dni
+• Mediana czasu do integracji: 47 dni (cel: 14 dni)
+
+[Rekomendacja]
+→ Automated check-in email na dzień 7 i 14 bez integracji
+→ Alert dla CS na dzień 21
+→ Dedicated onboarding session dla enterprise (>10 użytkowników)
+
+[Wpływ]
+Redukcja churnu Starter o szacowane 8pp = ~180k PLN retencji rocznie
+```
+
+Na jednej stronie. Osoba, która ma 30 sekund, rozumie problem, dowód i rekomendację. Osoba z 10 minutami może wejść w szczegóły.
+
+## Jedna zmiana, którą możesz zrobić jutro
+
+Następny raport lub dashboard, który przygotowujesz - zanim zaczniesz klikać w Tableau czy pisać SQL, zadaj jedno pytanie:
+
+**"Jaka jedna decyzja ma zostać podjęta po tej prezentacji?"**
+
+Jeśli nie wiesz - zapytaj stakeholdera. Jeśli on też nie wie - nie rób raportu, zrób warsztat wymagań.
+
+Każdy element raportu powinien służyć tej jednej decyzji. Wszystko inne to ozdoba.
+
+To trudne, bo kusi żeby "pokazać całą pracę". Ale zarząd nie płaci Ci za pokazanie ile SQL-i napisałeś. Płaci za podjęcie lepszej decyzji.
+
+---
+
+*Polecam "Storytelling with Data" Cole Nussbaumer Knaflic - najlepsza książka o komunikacji przez dane jaką czytałem. Niedroga, konkretna, pełna przykładów.*

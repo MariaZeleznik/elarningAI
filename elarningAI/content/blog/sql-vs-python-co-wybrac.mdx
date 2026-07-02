@@ -1,0 +1,87 @@
+﻿Przez 14 lat w analityce odpowiedziałem na to pytanie może tysiąc razy. Na rozmowach kwalifikacyjnych, na szkoleniach, na LinkedIn, przy kawie z kolegami. Za każdym razem widzę tę samą minę rozmówcy: "Dobra, ale powiedz mi *konkretnie* co mam się uczyć."
+
+Więc powiem konkretnie. Moje zdanie po 14 latach, nie "z jednej strony, z drugiej strony".
+
+**Zacznij od SQL. Następnie dodaj Python. Kolejność ma znaczenie.**
+
+Teraz wyjaśnię dlaczego - i co to oznacza w praktyce.
+
+## Dlaczego SQL pierwszy
+
+Kiedy zaczynałem w 2010, dostałem do odebrania bazę danych z fakturami. Oracle, 50 milionów rekordów. Mój senior rzucił mi na biurko kartkę z dokumentacją Oracle SQL i powiedział: "Do wtorku chcę raport sprzedaży według regionów za ostatnie 2 lata." Miałem czas do wtorku nauczyć się tyle SQL, żeby to zrobić.
+
+Nauczyłem się. I to był najlepszy sposób na naukę SQL, jaki mogę sobie wyobrazić.
+
+SQL jest fundamentem z prostego powodu: **dane żyją w bazach danych**. Nie w Pythonie. Nie w Excelu. W bazach. I bez SQL jesteś zdany na łaskę i niełaskę osób, które te bazy obsługują. Z SQL możesz sam.
+
+Prawdziwy analit Data dziś pracuje z BigQuery, Snowflake, Redshift, Databricks. Wszystkie mówią SQL (z dialektami). Firmowe BI narzędzia (Power BI, Looker, Tableau) generują SQL pod spodem. dbt, które stało się standardem w transformacji danych, to w 90% SQL z nakładką.
+
+**Rzeczy, które robię CODZIENNIE wyłącznie w SQL:**
+- Eksploracja nowych datasetu (SELECT, GROUP BY, WHERE, LIMIT)
+- Budowanie raportów i KPI dla biznesu
+- Tworzenie widoków i tabel agregujących
+- Debugowanie pipeline'ów danych (co poszło nie tak i kiedy?)
+- Odpowiadanie na ad-hoc pytania od stakeholderów
+
+To jest 60–70% pracy analityka w większości firm.
+
+## Kiedy SQL mi nie wystarczy
+
+Jest kilka scenariuszy, w których sięgam po Python - i robię to zdecydowanie, bez żalowania że "SQL by nie dał rady":
+
+**Automatyzacja i orch (orchestration).** Airflow, Prefect, Luigi - to Python. Jeśli budujesz pipeline, który ma się uruchamiać codziennie o 6:00, pobierać dane z API, czyścić i ładować do hurtowni - to Python.
+
+**Dane niestrukturyzowane.** Teksty, JSON z zagnieżdżonymi polami, obrazy, pliki Excel z wariackim formatowaniem - Python i pandas/polars są tutaj jedynym sensownym wyborem.
+
+**Machine learning i statystyka.** scikit-learn, statsmodels, scipy. SQL nie ma funkcji do regresji logistycznej czy k-means. Python ma.
+
+**Zaawansowane wizualizacje.** Plotly i Matplotlib dają Ci możliwości, których Tableau i Power BI nie mają - szczególnie gdy potrzebujesz niestandardowych wykresów do raportu.
+
+**Scraping i integracje API.** Kiedy danych nie ma w bazie i trzeba je pobrać - Python, requests, BeautifulSoup.
+
+## Ile czasu potrzebujesz na każde z nich?
+
+To pytanie, które słyszę najczęściej. Moja odpowiedź:
+
+**SQL na poziomie "praca gotowa":** 3–4 miesiące regularnej praktyki. Meaning: SELECT, JOIN, GROUP BY, HAVING, subquery, window functions na poziomie podstawowym. To wystarczy do 80% zadań analitycznych.
+
+**SQL zaawansowany** (window functions biegle, CTEs, optymalizacja, dialekty Snowflake/BigQuery): kolejne 6–12 miesięcy praktyki produkcyjnej. Przychodzi przez doświadczenie, nie kurs.
+
+**Python podstawy dla analityka:** 2–3 miesiące na solidne podstawy. pandas, numpy, matplotlib, podstawy klas i funkcji. To nie jest Python dla developera - to Python dla osoby, która wie SQL i chce automatyzować i analizować.
+
+**Python zaawansowany** (API, web scraping, ML pipeline): kolejne 6–12 miesięcy. I to jest już ścieżka bliższa data scientist niż data analyst.
+
+## Co mi mówią moje projekty z ostatnich 3 lat
+
+Przejrzałem ostatnie projekty konsultingowe. Rozkład narzędzi:
+
+| Projekt | Główne narzędzie | Czemu |
+|---------|-----------------|-------|
+| Migracja hurtowni (retail) | dbt + SQL | Transformacje danych w Snowflake |
+| Dashboard KPI (e-comm) | SQL + Power BI | Dane strukturyzowane, stakeholderzy chcą klikalny raport |
+| Analiza churnu (SaaS) | Python (pandas + sklearn) | ML, dane z wielu źródeł w różnych formatach |
+| Automatyzacja raportów (fintech) | Python (Airflow + pandas) | Codzienne wysyłki emailowe z raportami |
+| Analiza ankiet (NGO) | Python (pandas + matplotlib) | Tekst + niestandardowe wizualizacje do prezentacji |
+| Wdrożenie dbt (logistyka) | dbt + SQL | Standardizacja transformacji, testy danych |
+
+SQL był w 4 z 6 projektów jako główne narzędzie. Python - w 3 z 6. Oba - w 1. To nie jest przypadek.
+
+## Pułapka, której chcę cię uchronić
+
+Widziałem analityków, którzy uczyli się Pythona *przed* SQL. Umieli napisać piękny kod w pandas - ale nie umieli napisać podzapytania SQL. W efekcie: robili w Pythonie rzeczy, które baza danych robiłaby 100× szybciej.
+
+Jedna z moich klientek ściągała całą tabelę (2 miliony wierszy) do Pythona, filtrowała w pandas i liczyła agregacje. Query w SQL zwracało wynik w 2 sekundy. Jej Pythonowy notebook ładował się 4 minuty.
+
+SQL na poziomie bazy danych jest nieporównywalnie szybszy niż pandas na kliencie. Dlatego profesjonalista wie, gdzie wykonać obliczenia - i deleguje do SQL wszystko, co SQL robi lepiej.
+
+## Moja jedna konkretna rada
+
+Jeśli zaczynasz: **kup lub znajdź darmowy kurs SQL i przez pierwsze 3 miesiące rób tylko SQL**. Nic innego. Rozwiązuj ćwiczenia na sqlzoo.net, leetcode (SQL section), mode.com. Naucz się tego na pamięć: SELECT, FROM, WHERE, GROUP BY, HAVING, ORDER BY, JOIN (wszystkie rodzaje), subquery, window functions (podstawy).
+
+Po 3 miesiącach, gdy SELECT skomplikowanej tabeli z 3 joinami i okienką przestanie być wyzwaniem - wtedy zacznij Python.
+
+Nie dlatego, że Python jest gorszy. Ale dlatego, że z SQL w kieszeni Python staje się narzędziem uzupełniającym, a nie alternatywnym. I to jest właściwy sposób patrzenia.
+
+---
+
+*Zaczynasz naukę SQL i nie wiesz od czego? Opisuję swoją konkretną ścieżkę nauki w następnym artykule - bez płatnych kursów, bo naprawdę nie trzeba.*

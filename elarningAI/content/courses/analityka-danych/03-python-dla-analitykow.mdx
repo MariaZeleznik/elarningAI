@@ -1,0 +1,88 @@
+﻿---
+title: Python dla analityków danych
+module: 3
+order: 3
+free: false
+duration: 60
+---
+
+Excel ma swoje limity - 1 048 576 wierszy to brzmi jak dużo, dopóki nie dostaniesz datasetu z 5 milionami rekordów. Python nie ma takich ograniczeń, a z biblioteką pandas operacje na danych są niemal tak intuicyjne jak w Excelu.
+
+## Dlaczego pandas?
+
+pandas to de facto standard analizy danych w Pythonie. Główne powody:
+- Obsługuje CSV, Excel, SQL, JSON, Parquet - jedna biblioteka do wszystkiego
+- Operacje na kolumnach i wierszach podobne do SQL
+- Integracja z matplotlib i seaborn (wizualizacje)
+- Działa z milionami wierszy bez problemu
+
+## Podstawy pandas
+
+```python
+import pandas as pd
+
+# Wczytaj CSV
+df = pd.read_csv('sprzedaz.csv')
+
+# Podgląd danych
+print(df.head())        # pierwsze 5 wierszy
+print(df.info())        # typy kolumn, null values
+print(df.describe())    # statystyki opisowe
+
+# Filtrowanie (jak WHERE w SQL)
+df_warszawa = df[df['miasto'] == 'Warszawa']
+df_duze = df[df['kwota'] > 1000]
+df_combo = df[(df['miasto'] == 'Warszawa') & (df['kwota'] > 1000)]
+
+# Grupowanie (jak GROUP BY w SQL)
+sprzedaz_per_region = df.groupby('region')['kwota'].sum().reset_index()
+sprzedaz_per_region = sprzedaz_per_region.sort_values('kwota', ascending=False)
+```
+
+## Czyszczenie danych
+
+Analitycy spędzają ~80% czasu na czyszczeniu danych. pandas robi to efektywnie:
+
+```python
+# Sprawdź brakujące wartości
+print(df.isnull().sum())
+
+# Usuń wiersze z brakami
+df_clean = df.dropna()
+
+# Uzupełnij braki medianą (dla liczb)
+df['kwota'] = df['kwota'].fillna(df['kwota'].median())
+
+# Usuń duplikaty
+df = df.drop_duplicates()
+
+# Zmień typ kolumny
+df['data'] = pd.to_datetime(df['data'])
+df['kwota'] = pd.to_numeric(df['kwota'], errors='coerce')
+```
+
+## Wizualizacja z matplotlib
+
+```python
+import matplotlib.pyplot as plt
+
+# Wykres słupkowy - sprzedaż per miesiąc
+df['miesiac'] = df['data'].dt.month
+sprzedaz_mies = df.groupby('miesiac')['kwota'].sum()
+
+fig, ax = plt.subplots(figsize=(10, 5))
+ax.bar(sprzedaz_mies.index, sprzedaz_mies.values, color='#1B2E4B')
+ax.set_xlabel('Miesiąc')
+ax.set_ylabel('Sprzedaż (PLN)')
+ax.set_title('Sprzedaż miesięczna 2024')
+plt.tight_layout()
+plt.savefig('sprzedaz.png', dpi=150)
+```
+
+## Ćwiczenie
+
+Pobierz dataset Titanic z Kaggle (bezpłatny) lub użyj `pd.read_csv('https://raw.githubusercontent.com/datasciencedojo/datasets/master/titanic.csv')`. Odpowiedz na pytanie: jaki był współczynnik przeżycia w zależności od klasy podróży (Pclass)?
+
+---
+
+W następnej lekcji: **Statystyka i A/B testing w praktyce**.

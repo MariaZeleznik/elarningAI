@@ -1,0 +1,210 @@
+﻿---
+title: Automatyzacja raportów - Python, Airflow i schedulery
+module: 11
+order: 11
+free: false
+duration: 50
+exercise:
+  prompt: "Napisz skrypt Python który generuje prosty raport CSV: wczytuje dane (słownik z lista zamówień), oblicza sumę i średnią wartości, i zapisuje wyniki do pliku 'raport.csv'. Użyj pandas i datetime do dodania daty generacji."
+  expected: "import pandas as pd\nfrom datetime import datetime\nzamowienia = {'id': [1,2,3,4,5], 'wartosc': [150, 320, 80, 450, 210]}\ndf = pd.DataFrame(zamowienia)\nraport = pd.DataFrame({'metryka': ['suma', 'srednia', 'data_generacji'], 'wartosc': [df['wartosc'].sum(), df['wartosc'].mean(), datetime.now().isoformat()]})\nraport.to_csv('raport.csv', index=False)\nprint(raport)"
+  hint: "Stwórz DataFrame z wynikami (suma, średnia, data) i zapisz do CSV przez df.to_csv()"
+  language: python
+---
+
+Przez pierwsze 2 lata pracy robiłam ten sam raport ręcznie co piątek. Wczytaj dane, odfiltruj, policz, skopiuj do Excela, prześlij mailem. 45 minut tygodniowo = 39 godzin rocznie. Jeden skrypt Pythona skrócił to do 0. Teraz raport ląduje w mailbox szefa o 7:00 w piątek, zanim wstanie.
+
+## Filozofia automatyzacji raportów
+
+Cokolwiek robisz ręcznie więcej niż raz - zautomatyzuj. Dotyczy to:
+- Cyklicznych raportów (dzienne, tygodniowe, miesięczne)
+- Raportów "wyciągnij z bazy i wyślij mailem"
+- Pobierania danych z API i agregacji
+- Monitorowania anomalii (alert gdy KPI spada poniżej progu)
+
+## Skrypt raportowy od zera
+
+```python
+import pandas as pd
+import matplotlib.pyplot as plt
+from datetime import datetime, timedelta
+from pathlib import Path
+import smtplib
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
+from email.mime.base import MIMEBase
+from email import encoders
+import os
+
+def pobierz_dane_sprzedazy(dni: int = 7) -> pd.DataFrame:
+    """W produkcji: zapytanie SQL do bazy danych."""
+    import sqlalchemy
+    # engine = sqlalchemy.create_engine("postgresql://user:pass@host/db")
+    # query = f"""
+    #     SELECT order_date, category, region, SUM(revenue) as revenue
+    #     FROM orders
+    #     WHERE order_date >= CURRENT_DATE - INTERVAL '{dni} days'
+    #     GROUP BY 1, 2, 3
+    # """
+    # return pd.read_sql(query, engine)
+    
+    # Na potrzeby demo: dane symulowane
+    import numpy as np
+    np.random.seed(42)
+    daty = pd.date_range(end=datetime.now(), periods=dni, freq='D')
+    return pd.DataFrame({
+        'data': np.repeat(daty, 4),
+        'kategoria': np.tile(['Elektronika', 'Odzież', 'Sport', 'Dom'], dni),
+        'region': np.random.choice(['Północ', 'Południe', 'Centrum'], dni*4),
+        'przychod': np.random.lognormal(11, 0.5, dni*4),
+    })
+
+def generuj_wykres(df: pd.DataFrame, sciezka: str) -> None:
+    fig, axes = plt.subplots(1, 2, figsize=(14, 5))
+    
+    # Trend sprzedaży
+    daily = df.groupby('data')['przychod'].sum().reset_index()
+    axes[0].plot(daily['data'], daily['przychod']/1000, 'b-o', markersize=6)
+    axes[0].set_title('Dzienny przychód (tys. PLN)')
+    axes[0].set_xlabel('')
+    axes[0].tick_params(axis='x', rotation=45)
+    axes[0].yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{x:.0f}k'))
+    
+    # Per kategoria
+    kat = df.groupby('kategoria')['przychod'].sum().sort_values(ascending=True)
+    axes[1].barh(kat.index, kat.values/1000, color='steelblue')
+    axes[1].set_title('Przychód per kategoria')
+    axes[1].set_xlabel('Tys. PLN')
+    
+    plt.tight_layout()
+    plt.savefig(sciezka, dpi=150, bbox_inches='tight')
+    plt.close()
+
+def generuj_html_raport(df: pd.DataFrame) -> str:
+    total = df['przychod'].sum()
+    avg_daily = df.groupby('data')['przychod'].sum().mean()
+    
+    tabela_html = (
+        df.groupby('kategoria')['przychod']
+        .agg(['sum', 'mean', 'count'])
+        .rename(columns={'sum': 'Suma', 'mean': 'Średnia', 'count': 'Transakcji'})
+        .style
+        .format({'Suma': '{:,.0f} PLN', 'Średnia': '{:,.0f} PLN', 'Transakcji': '{:.0f}'})
+        .set_table_attributes('border="1" cellpadding="6" style="border-collapse:collapse"')
+        .to_html()
+    )
+    
+    return f"""
+    <html><body style="font-family: Arial, sans-serif; max-width: 600px;">
+        <h2>📊 Raport tygodniowy - {datetime.now().strftime('%d.%m.%Y')}</h2>
+        <table width="100%" style="background:#f5f5f5; padding:16px; border-radius:8px;">
+            <tr>
+                <td><b>Łączny przychód:</b> {total:,.0f} PLN</td>
+                <td><b>Śr. dzienny:</b> {avg_daily:,.0f} PLN</td>
+            </tr>
+        </table>
+        <h3>Per kategoria</h3>
+        {tabela_html}
+        <p><small>Wygenerowano automatycznie: {datetime.now().strftime('%d.%m.%Y %H:%M')}</small></p>
+    </body></html>
+    """
+
+def wyslij_email(html: str, zalacznik: str, odbiorcy: list[str]) -> None:
+    msg = MIMEMultipart()
+    msg['From'] = 'raporty@firma.pl'
+    msg['To'] = ', '.join(odbiorcy)
+    msg['Subject'] = f'Raport tygodniowy - {datetime.now().strftime("%d.%m.%Y")}'
+    
+    msg.attach(MIMEText(html, 'html', 'utf-8'))
+    
+    # Załącznik PNG
+    with open(zalacznik, 'rb') as f:
+        part = MIMEBase('application', 'octet-stream')
+        part.set_payload(f.read())
+        encoders.encode_base64(part)
+        part.add_header('Content-Disposition', f'attachment; filename="{Path(zalacznik).name}"')
+        msg.attach(part)
+    
+    # SMTP (np. Gmail z App Password lub SendGrid)
+    # with smtplib.SMTP_SSL('smtp.gmail.com', 465) as server:
+    #     server.login('user@gmail.com', os.getenv('GMAIL_APP_PASSWORD'))
+    #     server.send_message(msg)
+    print(f"Email wysłany do: {odbiorcy}")
+
+# Uruchomienie
+if __name__ == '__main__':
+    df = pobierz_dane_sprzedazy(dni=7)
+    generuj_wykres(df, '/tmp/wykres.png')
+    html = generuj_html_raport(df)
+    wyslij_email(html, '/tmp/wykres.png', ['szef@firma.pl'])
+    print("Raport wysłany!")
+```
+
+## Harmonogramowanie - cron i Task Scheduler
+
+### Linux/Mac: crontab
+
+```bash
+# crontab -e
+# Format: minuta godzina dzień miesiąc dzień_tygodnia komenda
+
+# Co piątek o 7:00
+0 7 * * 5 /usr/bin/python3 /home/user/raporty/tygodniowy.py
+
+# Co dzień o 6:30 rano
+30 6 * * * /usr/bin/python3 /home/user/raporty/dzienny.py >> /var/log/raporty.log 2>&1
+
+# 1. dnia każdego miesiąca o 9:00
+0 9 1 * * /usr/bin/python3 /home/user/raporty/miesieczny.py
+```
+
+### Windows: Task Scheduler
+
+```powershell
+# Stwórz zaplanowane zadanie (PowerShell)
+$action = New-ScheduledTaskAction -Execute 'python' -Argument 'C:\raporty\tygodniowy.py'
+$trigger = New-ScheduledTaskTrigger -Weekly -DaysOfWeek Friday -At '07:00'
+Register-ScheduledTask -Action $action -Trigger $trigger -TaskName 'RaportTygodniowy'
+```
+
+## Apache Airflow - orkiestracja pipeline'ów
+
+Airflow to standard dla złożonych pipeline'ów danych:
+
+```python
+from datetime import datetime
+from airflow import DAG
+from airflow.operators.python import PythonOperator
+
+def ekstrahuj_dane():
+    print("Pobieranie danych z DB...")
+    # tu: połączenie z bazą, zapis do pliku/S3
+
+def transformuj_dane():
+    print("Obliczenia, agregacje...")
+
+def laduj_do_bazy():
+    print("Zapis do data warehouse...")
+
+def wyslij_raport():
+    print("Email z raportem...")
+
+with DAG(
+    dag_id='raport_tygodniowy',
+    start_date=datetime(2025, 1, 1),
+    schedule_interval='0 7 * * 5',  # co piątek o 7:00
+    catchup=False,
+    tags=['raporty', 'sprzedaz'],
+) as dag:
+    
+    ekstrahuj = PythonOperator(task_id='ekstrahuj', python_callable=ekstrahuj_dane)
+    transformuj = PythonOperator(task_id='transformuj', python_callable=transformuj_dane)
+    laduj = PythonOperator(task_id='laduj', python_callable=laduj_do_bazy)
+    wyslij = PythonOperator(task_id='wyslij_raport', python_callable=wyslij_raport)
+    
+    # Zależności: pipeline liniowy
+    ekstrahuj >> transformuj >> laduj >> wyslij
+```
+
+Airflow daje: UI do monitorowania pipeline'ów, retry przy awarii, alerty, historia uruchomień.
+
+Następna lekcja: Projekt analityczny - kompleksowa analiza danych e-commerce od danych do prezentacji.

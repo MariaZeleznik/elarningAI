@@ -1,0 +1,57 @@
+Mój ulubiony moment w projekcie ML to kiedy klient pyta: "Ale skąd wiemy, że ten model jest dobry?"
+
+To jest właściwe pytanie. Większość projektów nie ma na nie odpowiedzi — i to mnie niepokoi bardziej niż jakiekolwiek inne. Przez kilka lat pracowałam przy systemach, gdzie mierzono tylko "satisfaction score" po rozmowie, bo nikt nie wiedział jak mierzyć jakość odpowiedzi. Działało dopóki nie przestało działać. I w kilku projektach skończyło się nieprzyjemnie na dużych klientach.
+
+Ewaluacja LLM jest trudna. Ale "trudna" nie znaczy "niemożliwa". Znaczy że trzeba o niej myśleć inaczej niż o klasycznej klasyfikacji.
+
+## Dlaczego BLEU i ROUGE nie mają tu sensu
+
+BLEU, ROUGE — metryki z ery tłumaczenia maszynowego. Liczą nakładanie się n-gramów między Twoją odpowiedzią a "wzorową". Problem jest fundamentalny.
+
+Dla pytania "Jaka jest stolica Niemiec?" odpowiedź "Berlin" i "Stolicą Niemiec jest piękny Berlin" mają według BLEU inny score, mimo że obie są poprawne. Z kolei przekonująco napisana halucynacja może dostać wysoki score jeśli brzmi podobnie do wzoru.
+
+LLM generują tekst, który może być semantycznie identyczny przy zupełnie różnych słowach. Metryki n-gramowe tego nie widzą. Gorsze — LLM mogą być błędne w sposób gładki i przekonujący. Mierzenie estetyki pisania przy złych faktach to nie jest ewaluacja jakości.
+
+## Co faktycznie mierzyć
+
+Zależy od zadania. I to nie jest wykręt — to naprawdę jest odpowiedź.
+
+Jeśli masz zadanie z weryfikowalnym wyjściem — klasyfikacja, ekstrakcja danych, generowanie kodu — mierz to. Accuracy, F1, recall. Napisz testy jednostkowe dla kodu. Porównaj ekstrahowane pola z referencją. To najprostszy i najwiarygodniejszy poziom ewaluacji.
+
+Jeśli wyjście jest otwartym tekstem bez jednej prawdziwej odpowiedzi — tutaj jest problem. Możesz użyć "LLM-as-a-judge": wziąć mocniejszy model i poprosić go o ocenę jakości odpowiedzi według konkretnych kryteriów. Brzmi absurdalnie, ale działa zaskakująco dobrze. Z zastrzeżeniami.
+
+LLM-as-a-judge ma bias w kierunku dłuższych, bardziej szczegółowych odpowiedzi. Ma preferencje dla "własnego" stylu — model od OpenAI inaczej ocenia niż Anthropic. Kalibruj przez próbkowanie: regularnie sprawdzaj ręcznie kilkanaście przypadków i porównuj z tym co mówi judge.
+
+Dla projektów produkcyjnych wypracowałam zestaw czterech metryk, które stosuję domyślnie: faktyczna poprawność (czy informacje są prawdziwe?), kompletność (czy pytanie zostało zaadresowane?), spójność z dokumentami źródłowymi (dla RAG), i bezpieczeństwo (czy odpowiedź nie jest szkodliwa?). Każda z nich wymaga innego sposobu mierzenia.
+
+## Dataset ewaluacyjny — to jest ważniejsze niż metody
+
+200 przypadków. Tyle jest absolutne minimum dla poważnej ewaluacji.
+
+Ale nie losowych 200. Podzielonych na kategorie: "normalne" zapytania (70–80% tego czego możesz się spodziewać), edge cases (niejasne, wieloznaczne, poza zakresem), adversariale (próby manipulacji, prompt injection), i "zawsze musi działać" (rzeczy, przy których błąd jest niedopuszczalny).
+
+Ten ostatni zestaw jest najważniejszy. W każdym projekcie masz listę pytań, na które system MUSI odpowiedzieć dobrze. Zawsze. Niezależnie od zmian w prompcie, modelu, chunking strategii. To Twój zestaw regresyjny.
+
+Mam klientów, którzy pominęli budowanie datasetu ewaluacyjnego na początku i przez cały projekt iterowali "na intuicję". Efekt: zmiana, która "wydaje się lepsza", może niszczyć coś innego. Bez dataset to nie wiesz.
+
+## Monitoring w produkcji, bo modele się degradują
+
+System LLM bez monitoringu to bomba zegarowa.
+
+Wiem, bo obserwowałam projekt, gdzie po 3 miesiącach system zaczął odpowiadać gorzej. Dokumentacja produktu była aktualizowana, ale baza wektorowa nie. Odpowiedzi były "poprawne" dla starej wersji, błędne dla nowej. Nikt nie zauważył przez dwa tygodnie.
+
+Minimalne metryki do śledzenia: latencja (p50, p95 — chcesz wiedzieć zarówno medianę jak i ogon), error rate (kiedy API zwraca błąd lub guardrails blokuje odpowiedź), koszt per zapytanie (niespodziewany wzrost to sygnał że coś jest nie tak), i rejection rate.
+
+Logi każdego zapytania i odpowiedzi — ze zredagowanymi danymi osobowymi — to Twój zasób na przyszłość. Do analizy błędów, do fine-tuningu, do raportowania. Przechowuj minimum 30 dni.
+
+## Ewaluacja ludzka — nie daje się jej zastąpić
+
+Przy wszystkich automatycznych metrykach i LLM-as-a-judge — regular human sampling jest niezbędny. Co tydzień wziąć 10-20 losowych rozmów i ocenić je ręcznie. To jedyna metoda, która łapie rzeczy, których nie spodziewasz się mierzyć.
+
+W jednym z projektów (asystent dla działu sprzedaży) regular sampling pokazał że model poprawnie odpowiadał na pytania techniczne, ale używał tonu który był zbyt "akademicki" jak na kulturę tej firmy. Żadna automatyczna metryka tego nie złapała. Klienci wewnętrzni przestali używać systemu. Dopiero ankieta wśród użytkowników ujawniła problem.
+
+Dobra ewaluacja LLM to kombinacja kilku warstw — nie jedno narzędzie, nie jedna metoda. Zacznij od najprostszego co możesz zmierzyć. Buduj od tego.
+
+---
+
+*Więcej o tym jak wdrożyć system LLM w produkcji — od architektury przez guardrails do monitoringu — w poprzednim artykule.*

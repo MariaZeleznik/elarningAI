@@ -1,0 +1,173 @@
+﻿---
+title: Power BI zaawansowany - DAX, Time Intelligence i RLS
+module: 7
+order: 7
+free: false
+duration: 55
+exercise:
+  prompt: "Napisz miarę DAX która oblicza skumulowaną sumę sprzedaży YTD (Year-to-Date) korzystając z funkcji TOTALYTD. Zakładamy że mamy miarę [Suma sprzedaży] i tabelę kalendarza 'Daty' z kolumną 'Data'."
+  expected: "Sprzedaż YTD = \nTOTALYTD(\n    [Suma sprzedaży],\n    Daty[Data]\n)"
+  hint: "TOTALYTD przyjmuje wyrażenie i kolumnę daty. Składnia: TOTALYTD(<expression>, <dates>)"
+  language: sql
+---
+
+Po tygodniu w Power BI byłam zadowolona z podstawowych wykresów. Po miesiącu odkryłam DAX i zrozumiałam, że to właśnie tu leży różnica między "osoba która robi wykresy" a "analityk BI który daje wartość". DAX to nie tylko sumy - to całe środowisko do manipulowania kontekstem obliczeniowym.
+
+## Kontekst obliczeniowy - najważniejsze pojęcie DAX
+
+DAX ma dwa rodzaje kontekstu:
+- **Row context** - "teraz przetwarzamy ten konkretny wiersz"
+- **Filter context** - "teraz aktywny jest filtr: region=Północ, rok=2025"
+
+Miary DAX działają w **filter context** - to co wyświetla matrix/wykres/karta zmienia kontekst obliczeń.
+
+```dax
+-- To samo DAX, inny wynik w zależności od kontekstu:
+Suma sprzedaży = SUM(Zamówienia[Wartość])
+-- W kartonie z filtrem "2025" → suma za 2025
+-- W matrycy z wierszami = regiony → suma per region
+-- W slicerze z Polską → suma dla Polski
+```
+
+## CALCULATE - serce DAX
+
+`CALCULATE` to funkcja do **modyfikowania filter context**:
+
+```dax
+-- Sprzedaż online (bez względu na aktualny filtr kanału)
+Sprzedaż online = 
+CALCULATE(
+    [Suma sprzedaży],
+    Zamówienia[Kanał] = "Online"
+)
+
+-- Sprzedaż za poprzedni rok (override daty)
+Sprzedaż poprzedni rok =
+CALCULATE(
+    [Suma sprzedaży],
+    DATEADD(Daty[Data], -1, YEAR)
+)
+
+-- Sprzedaż TOP 5 klientów (filtr dynamiczny)
+Sprzedaż TOP5 klientów =
+CALCULATE(
+    [Suma sprzedaży],
+    TOPN(5, ALL(Klienci), [Suma sprzedaży], DESC)
+)
+
+-- Udział w całości (% of total)
+Udział % w sprzedaży =
+DIVIDE(
+    [Suma sprzedaży],
+    CALCULATE([Suma sprzedaży], ALL(Zamówienia))
+)
+```
+
+## Time Intelligence - analizy czasowe
+
+Power BI ma dedykowaną tabelę kalendarza i funkcje Time Intelligence:
+
+```dax
+-- Stała tabela kalendarza (zalecana jako osobna tabela)
+-- Data = CALENDAR(DATE(2020,1,1), DATE(2027,12,31))
+
+-- Metryki YTD, MTD, QTD
+Sprzedaż YTD = TOTALYTD([Suma sprzedaży], Daty[Data])
+Sprzedaż MTD = TOTALMTD([Suma sprzedaży], Daty[Data])
+Sprzedaż QTD = TOTALQTD([Suma sprzedaży], Daty[Data])
+
+-- YoY (rok do roku)
+Sprzedaż PY = CALCULATE([Suma sprzedaży], SAMEPERIODLASTYEAR(Daty[Data]))
+YoY Growth % = DIVIDE([Suma sprzedaży] - [Sprzedaż PY], [Sprzedaż PY])
+
+-- MoM (miesiąc do miesiąca)
+Sprzedaż PM = CALCULATE([Suma sprzedaży], DATEADD(Daty[Data], -1, MONTH))
+MoM Growth % = DIVIDE([Suma sprzedaży] - [Sprzedaż PM], [Sprzedaż PM])
+
+-- Rolling 12 miesięcy
+Sprzedaż R12M =
+CALCULATE(
+    [Suma sprzedaży],
+    DATESINPERIOD(Daty[Data], LASTDATE(Daty[Data]), -12, MONTH)
+)
+```
+
+## Zaawansowane miary: RANKX, TOPN, PERCENTILE
+
+```dax
+-- Ranking klientów wg sprzedaży (dynamiczny per kontekst)
+Ranking klienta =
+RANKX(
+    ALL(Klienci[Klient ID]),
+    [Suma sprzedaży],
+    ,
+    DESC,
+    DENSE
+)
+
+-- Flaga: czy klient jest w TOP 20%?
+Czy TOP 20% =
+VAR CałkowitaLiczbaKlientów = COUNTROWS(ALL(Klienci))
+VAR Ranking = [Ranking klienta]
+RETURN
+    IF(Ranking <= CałkowitaLiczbaKlientów * 0.2, "TOP 20%", "Pozostali")
+
+-- Sprzedaż per aktywny klient (filtrowanie blank)
+Sprzedaż per aktywny klient =
+DIVIDE(
+    [Suma sprzedaży],
+    CALCULATE(
+        DISTINCTCOUNT(Zamówienia[Klient ID]),
+        Zamówienia[Wartość] > 0  -- tylko klienci z zakupami
+    )
+)
+```
+
+## Row-Level Security (RLS) - ochrona danych
+
+RLS ogranicza dostęp do danych per użytkownik - menedżer widzi tylko swój region:
+
+```dax
+-- W Power BI Desktop: Modeling → Manage Roles
+
+-- Rola "Region Manager":
+-- Tabela: Regiony
+-- Wyrażenie DAX:
+[Email] = USERPRINCIPALNAME()
+-- Gdzie USERPRINCIPALNAME() = email zalogowanego użytkownika
+
+-- Jeśli tabela Regiony ma kolumnę [Email] managera regionu:
+-- Jan.Kowalski@firma.pl widzi tylko wiersze gdzie Email = "Jan.Kowalski@firma.pl"
+-- Co automatycznie filtruje połączone tabele Zamówień, Klientów itd.
+```
+
+## Power BI vs inne narzędzia BI
+
+| Funkcja | Power BI | Tableau | Looker | Google Looker Studio |
+|---------|---------|---------|--------|---------------------|
+| Cena | Free Desktop / $10/mies | $70+/mies | Drogi enterprise | Darmowy |
+| DAX/obliczenia | ✅ Potężny | Ograniczony | LookML | Ograniczony |
+| Źródła danych | 150+ | 100+ | BI-first | Google-first |
+| Integracja MS | ✅ Natywna | Dobra | Słaba | Słaba |
+| Krzywa uczenia | Średnia | Mała | Duża | Mała |
+
+**Reguła:** jeśli firma używa Microsoft 365 i Azure - Power BI. Jeśli Salesforce + dużo nie-MS - Tableau. Jeśli startup z ograniczonym budżetem - Looker Studio.
+
+## Optymalizacja wydajności
+
+```dax
+-- Używaj zmiennych VAR dla re-używania obliczeń
+Przychód per region % =
+VAR PrzychódTotalny = CALCULATE([Suma sprzedaży], ALL(Regiony))
+VAR PrzychódRegionu = [Suma sprzedaży]
+RETURN
+DIVIDE(PrzychódRegionu, PrzychódTotalny)
+
+-- Unikaj FILTER z SUM - używaj CALCULATE z predykatem
+-- Wolno:
+Sprzedaż online slow = SUMX(FILTER(Zamówienia, Zamówienia[Kanał] = "Online"), Zamówienia[Wartość])
+-- Szybko:
+Sprzedaż online fast = CALCULATE([Suma sprzedaży], Zamówienia[Kanał] = "Online")
+```
+
+Następna lekcja: A/B Testing - jak projektować i analizować eksperymenty.
